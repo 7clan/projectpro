@@ -43,7 +43,7 @@ Uploaded PDF bytes are parsed with PyMuPDF and stored locally; text extraction i
 
 ## Retrieval and optional coach
 
-Selected page texts are retrieved via a basic term-frequency matcher; sources are returned with document title and page number. No embeddings or vector database are used at this stage; do not label this as semantic search or full production RAG. If a Gemini or OpenRouter key exists, a constrained Socratic prompt receives the question, beam parameters, and up to three retrieved excerpts. Otherwise deterministic guiding questions are returned. Numeric correctness remains the responsibility of `engine.py`; free-form AI is a learning aid, not the grader.
+Selected page texts are retrieved via a basic term-frequency matcher; sources are returned with document title and page number. No embeddings or vector database are used at this stage; do not label this as semantic search or full production RAG. If a Gemini or OpenRouter key exists, a constrained Socratic prompt receives the question, beam parameters, and up to three retrieved excerpts. Otherwise deterministic guiding questions are returned. Before any third-party model request, the user must consent to sharing the question, beam parameters, and up to three PDF excerpts; cancellation uses the local guide. Numeric correctness remains the responsibility of `engine.py`; free-form AI is a learning aid, not the grader.
 
 **Prompt injection risk:** PDF excerpts are untrusted and explicitly described as non-instructional; this reduces but does not eliminate prompt injection. External providers could receive course excerpts. Obtain consent before enabling live AI with real educational materials.
 

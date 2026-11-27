@@ -77,6 +77,7 @@ Not implemented: institutional integrations, teacher dashboard, automated curric
 ## Verify the code
 
 ```bash
+pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
@@ -107,7 +108,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for data flow, formulas, mode
 
 - Every user owns their PDFs, reading events and attempts. Every document/challenge endpoint checks ownership.
 - PDFs are stored locally in SQLite, with a 12 MB / 120 page limit. Session tokens expire after 3 days; passwords use salted PBKDF2-HMAC-SHA256.
-- Raw uploaded content may be sent **as selected excerpts to Gemini/OpenRouter only if a key is configured and the student invokes the coach**. Do not connect personal/course PDFs to an external LLM without explicit informed consent.
+- Raw uploaded content may be sent **as selected excerpts to Gemini/OpenRouter only if a key is configured and the student explicitly consents when invoking the coach**. Refusing consent preserves the local guidance mode.
 - In this one-day proof of concept, accounts are local, data is **not encrypted at rest**, and there is no operator-managed deletion or consent flow. Do **not** use this build with sensitive real student data or expose it publicly unchanged.
 - The learning score is a transparent heuristic, not a grade or academic risk prediction. The explanation checklist uses keywords and can be fooled.
 - Citation display indicates *retrieval provenance*, never automatic factual verification. Deterministic engineering results have priority.

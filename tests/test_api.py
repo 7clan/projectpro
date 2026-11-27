@@ -85,3 +85,11 @@ def test_preferences_and_invalid_parameters(client,auth):
     assert client.put('/api/preferences',headers=auth,json={'exam_date':'2026-12-05'}).status_code==200
     assert client.post('/api/challenges',headers=auth,json={'length':3,'load':5,'position':5,'udl':0}).status_code==422
     assert client.post('/api/challenges',headers=auth,json={'kind':'transfer'}).status_code==409
+
+
+def test_external_ai_requires_explicit_consent(client,auth,monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY","fake-test-key")
+    r=client.post("/api/coach",headers=auth,json={"question":"Moment de la poutre ?","lang":"fr"})
+    assert r.status_code==200
+    assert r.json()["mode"]=="guided_offline"
+    assert "consentement" in r.json()["notice"]

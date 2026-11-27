@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from .ai import ai_status, coach, search_sources
+from .ai import ai_status, coach, fallback_help, search_sources
 from .engine import Beam, CONCEPTS, MISTAKES_EN, MISTAKES_FR, explanation_check
 from .learning import RESOURCES, profile, resources_for
 from .storage import (
@@ -105,6 +105,7 @@ class CoachRequest(BaseModel):
     challenge_id: str | None = None
     lang: str = 'fr'
     reveal: bool = False
+    consent_external: bool = False
 
 
 class ReadingEvent(BaseModel):
@@ -398,4 +399,8 @@ async def tutor(payload:CoachRequest,user=Depends(user_from_token)):
         attempted=False
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
+    if ai_status()["enabled"] and not payload.consent_external:
+        result=fallback_help(payload.question,b,payload.lang,sources)
+        result["notice"] = "Aucune donnée envoyée à un fournisseur IA sans consentement explicite." if payload.lang=="fr" else "No data sent to an AI provider without explicit consent."
+        return result
     return await coach(payload.question,b,payload.lang,sources,reveal=attempted)

@@ -1,4 +1,3 @@
-import math
 import pytest
 from app.engine import Beam, explanation_check
 
@@ -23,7 +22,7 @@ def test_equilibrium_and_moment_continuity(l,p,a,q):
     assert b.moment(a-1e-5)==pytest.approx(b.moment(a+1e-5),abs=0.005)
     assert b.moment(0)==pytest.approx(0)
     assert b.moment(l)==pytest.approx(0)
-    assert b.max_moment if hasattr(b,'max_moment') else b.moment(b.critical_x())>=0
+    assert b.moment(b.critical_x()) >= 0
 
 def test_misconceptions():
     b=Beam(8,12,2,2)

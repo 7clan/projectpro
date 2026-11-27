@@ -8,7 +8,7 @@ def ai_status():
     if os.getenv("GEMINI_API_KEY"):
         return {"enabled":True,"provider":"gemini","model":os.getenv("GEMINI_MODEL","gemini-2.5-flash")}
     if os.getenv("OPENROUTER_API_KEY"):
-        return {"enabled":True,"provider":"openrouter","model":os.getenv("OPENROUTER_MODEL","google/gemini-2.5-flash")}
+        return {"enabled":True,"provider":"openrouter","model":os.getenv("OPENROUTER_MODEL","openrouter/free")}
     return {"enabled":False,"provider":"guided","model":None}
 
 

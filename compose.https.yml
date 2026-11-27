@@ -1,0 +1,20 @@
+# OPTIONAL: Internet-facing pilot, not a production LMS. Read docs/DEPLOYMENT.md.
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      declic:
+        condition: service_healthy
+    environment:
+      DECLIC_DOMAIN: ${DECLIC_DOMAIN:?Set your domain before enabling HTTPS}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+volumes:
+  caddy-data:
+  caddy-config:

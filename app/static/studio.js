@@ -36,7 +36,8 @@ function draw(scene='load'){
  if(scene==='check')text(mid,113,say('Quelle équation choisir ?','Which equation would you choose?'),'#6358dc',19);
 }
 const palette={ink:'#24314b',blue:'#4775c9',purple:'#6358dc',green:'#16866f',orange:'#e16c50',muted:'#8194ad',red:'#c33b50',cyan:'#15a7bd',gold:'#d4a12d',pink:'#cc5897'};
-let boardTimers=[],boardReveals=[];
+let boardTimers=[],boardReveals=[],voiceAudio=null,voiceUrl=null;
+function releaseAudio(){if(voiceAudio){voiceAudio.pause();voiceAudio.removeAttribute('src');voiceAudio=null;}if(voiceUrl){URL.revokeObjectURL(voiceUrl);voiceUrl=null;}}
 function progressBoard(p){for(const item of boardReveals){if(!item.done&&p>=item.at){item.done=true;item.reveal();}}}
 function finishBoard(){progressBoard(1);}
 function timedBoard(duration){clearBoardTimers();const start=performance.now();const tick=()=>{const p=Math.min(1,(performance.now()-start)/duration);progressBoard(p);if(p<1)boardTimers.push(setTimeout(tick,60));};tick();}
@@ -70,14 +71,16 @@ function drawGenerated(step,animate=false){
 }
 
 function add(role,content){const node=document.createElement('div');node.className='studio-message '+role;node.textContent=content;by('studio-chatlog').appendChild(node);by('studio-chatlog').scrollTop=by('studio-chatlog').scrollHeight;}
-function stop(){clearBoardTimers();svg.getAnimations({subtree:true}).forEach(a=>a.cancel());ui.epoch++;ui.playing=false;clearTimeout(ui.timer);if('speechSynthesis'in window)window.speechSynthesis.cancel();by('studio-play').textContent='▶ Play';}
+function stop(){svg.dataset.audio='stopped';releaseAudio();clearBoardTimers();svg.getAnimations({subtree:true}).forEach(a=>a.cancel());ui.epoch++;ui.playing=false;clearTimeout(ui.timer);if('speechSynthesis'in window)window.speechSynthesis.cancel();by('studio-play').textContent='▶ Play';}
 function render(){const s=ui.steps[ui.index];if(!s)return;if(s.scene==='generated')drawGenerated(s,ui.playing);else draw(s.scene);by('studio-title').textContent=s.title;by('studio-formula').textContent=s.formula;by('studio-caption').textContent=s.narration;by('studio-count').textContent=(ui.index+1)+' / '+ui.steps.length;by('studio-prev').disabled=ui.index===0;by('studio-next').disabled=ui.index===ui.steps.length-1;by('studio-play').disabled=false;by('studio-steps').replaceChildren(...ui.steps.map((x,i)=>{const b=document.createElement('button');b.type='button';b.className=i===ui.index?'active':'';b.setAttribute('aria-label',x.title);b.onclick=()=>{stop();ui.index=i;render();};return b;}));}
 function play(){
  if(!ui.steps.length)return;
  stop();ui.playing=true;const epoch=ui.epoch;by('studio-play').textContent='■ Stop';
  function active(){return epoch===ui.epoch&&ui.playing;}
- function advance(){if(!active())return;clearTimeout(ui.timer);clearBoardTimers();finishBoard();ui.timer=setTimeout(()=>{if(!active())return;if(ui.index+1>=ui.steps.length){ui.playing=false;by('studio-play').textContent='▶ Play';return;}ui.index++;run();},1200);}
- function run(){if(!active())return;render();const s=ui.steps[ui.index],duration=Math.max(3500,s.narration.length*55);
+ function advance(){if(!active())return;svg.dataset.audio='ended';clearTimeout(ui.timer);clearBoardTimers();finishBoard();ui.timer=setTimeout(()=>{if(!active())return;if(ui.index+1>=ui.steps.length){ui.playing=false;by('studio-play').textContent='▶ Play';return;}ui.index++;run();},1200);}
+ async function run(){if(!active())return;releaseAudio();render();const s=ui.steps[ui.index],duration=Math.max(3500,s.narration.length*55);
+  if(by('studio-voice').checked){try{const res=await api('/api/studio/audio',{method:'POST',body:JSON.stringify({text:s.narration,lang:state.language})});const blob=await res.blob();if(!active())return;voiceUrl=URL.createObjectURL(blob);const audio=new Audio(voiceUrl);voiceAudio=audio;audio.ontimeupdate=()=>{if(active()&&Number.isFinite(audio.duration)&&audio.duration>0)progressBoard(audio.currentTime/audio.duration);};audio.onended=()=>{if(active())advance();};audio.onerror=()=>{if(active()){releaseAudio();timedBoard(duration);ui.timer=setTimeout(advance,duration);}};await audio.play();if(!active())return;svg.dataset.audio='playing';return;}catch{if(!active())return;releaseAudio();}}
+
   if(by('studio-voice').checked&&'speechSynthesis'in window&&'SpeechSynthesisUtterance'in window){
    const u=new SpeechSynthesisUtterance(s.narration);u.lang=fr()?'fr-FR':'en-US';u.rate=.95;
    let boundary=false,started=false;

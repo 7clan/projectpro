@@ -4,16 +4,20 @@ import re
 
 
 def ai_status():
-    from .providers import local_model,local_only,mode
+    from .providers import local_model,local_only,mode,cloud_model
     local=local_model()
     if mode()=='disabled':return {'enabled':False,'provider':'guided','model':None}
     if local_only():return {'enabled':bool(local),'provider':'ollama' if local else 'guided','model':local or None}
+    if mode()=="ollama_cloud":
+        cloud=cloud_model()
+        return {"enabled":bool(cloud),"provider":"ollama_cloud" if cloud else "guided","model":cloud or None}
     if os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"):
         return {"enabled":True,"provider":"openrouter","model":os.getenv("OPENROUTER_MODEL","openrouter/free")}
     if os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"):
         return {"enabled":True,"provider":"bazaarlink","model":"qwen/qwen3.7-flash"}
     if os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI"):
         return {"enabled":True,"provider":"gemini","model":os.getenv("GEMINI_MODEL","gemini-flash-lite-latest")}
+    if cloud_model():return {"enabled":True,"provider":"ollama_cloud","model":cloud_model()}
     if local and mode()!="cloud":return {"enabled":True,"provider":"ollama","model":local}
     return {"enabled":False,"provider":"guided","model":None}
 

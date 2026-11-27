@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 15
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+      GEMINI_API_KEY: ${{ secrets.GEMEINI }}
       OPENROUTER_MODEL: openrouter/free
       OPENROUTER_BOARD_MODEL: openrouter/free
     steps:
@@ -21,12 +22,16 @@ jobs:
       - run: pip install -r requirements-dev.txt playwright
       - run: python -m pytest -q && node --check app/static/studio.js
       - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng pulseaudio pulseaudio-utils
       - name: Record animated AI lesson
         run: |
           mkdir -p recordings
           python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/studio.log 2>&1 &
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
           python - <<'PY'
-          import time, urllib.request, json, os
+          import time, urllib.request, json, os, subprocess
           from playwright.sync_api import sync_playwright
           assert os.environ.get('OPENROUTER_API_KEY')
           for i in range(60):
@@ -36,18 +41,19 @@ jobs:
               except Exception:
                   time.sleep(.3)
           with sync_playwright() as p:
-              browser=p.chromium.launch()
+              browser=p.chromium.launch(ignore_default_args=['--mute-audio'],args=['--autoplay-policy=no-user-gesture-required'])
               ctx=browser.new_context(viewport={'width':1440,'height':900},record_video_dir='recordings',record_video_size={'width':1440,'height':900})
+              capture=subprocess.Popen(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','pulse','-i','declic.monitor','recordings/audio.wav'],stdin=subprocess.PIPE)
+              time.sleep(.5)
               page=ctx.new_page()
               errors=[]
               page.on('pageerror',lambda e:errors.append(str(e)))
               page.goto('http://127.0.0.1:8000')
               page.locator('#demo-login').click()
-              page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('openrouter')")
+              page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter')")
               page.locator('[data-view="studio"]').click()
               page.locator('#studio-consent').check()
-              # Headless Chromium has no guaranteed installed voice; test timed captions.
-              page.locator('#studio-voice').uncheck()
+              page.locator('#studio-voice').check()
               results=[]
               for question in ['Explique le théorème de Pythagore avec un triangle et les carrés construits sur ses côtés.', 'Maintenant montre comment fonctionne une file FIFO en informatique avec des éléments qui se déplacent.']:
                   page.locator('#studio-question').fill(question)
@@ -59,18 +65,27 @@ jobs:
                   assert 2<=len(payload['steps'])<=5
                   page.wait_for_function("document.querySelector('#studio-mode').textContent==='AI · GENERATED'")
                   page.wait_for_function("document.querySelectorAll('#studio-svg [data-generated]').length > 0")
+                  page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=20000)
                   page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=150000)
+                  assert page.locator('#studio-svg').get_attribute('data-audio')=='ended'
                   page.wait_for_timeout(1000)
                   results.append(payload)
               assert not errors,errors
               ctx.close()
               browser.close()
+              capture.communicate(b'q',timeout=15)
           with open('recordings/lesson-responses.json','w') as f:json.dump(results,f,ensure_ascii=False,indent=2)
-          print('PASS: two original AI-generated lessons; browser audio not tested')
+          print('PASS: two original AI-generated lessons with actual audio clock playback')
           PY
+      - name: Verify audio and mux recording
+        run: |
+          ffmpeg -hide_banner -i recordings/audio.wav -af volumedetect -f null - 2>recordings/audio-check.txt
+          cat recordings/audio-check.txt
+          python -c "import re; s=open('recordings/audio-check.txt').read(); assert float(re.search(r'max_volume: (-?[0-9.]+)',s).group(1)) > -50"
+          ffmpeg -hide_banner -loglevel error -y -i "$(find recordings -name '*.webm' | head -1)" -ss 0.5 -i recordings/audio.wav -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart recordings/DECLIC-live.mp4
       - name: Safe server diagnostics on failure
         if: failure()
-        run: grep -E 'Generative board attempt|Studio provider or parser failure' /tmp/studio.log || true
+        run: grep -E 'Provider .*failed|Gemini discovery|OpenRouter discovered|Model .*finish|Studio provider or parser failure' /tmp/studio.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

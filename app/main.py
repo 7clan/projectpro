@@ -469,3 +469,23 @@ async def studio_audio(payload: dict, user=Depends(user_from_token)):
             break
         off+=8+size+(size%2)
     return Response(bytes(wav),media_type='audio/wav',headers={'Cache-Control':'no-store'})
+
+
+class StudioReviewRequest(BaseModel):
+    question: str = Field(min_length=3,max_length=800)
+    steps: list[dict] = Field(min_length=2,max_length=5)
+    author_model: str = Field(min_length=1,max_length=200)
+    consent_external: bool = False
+
+@app.post('/api/studio/review')
+async def studio_review(payload:StudioReviewRequest,user=Depends(user_from_token)):
+    import json
+    from .whiteboard import validate_board
+    from .reviewer import review
+    if not payload.consent_external:
+        raise HTTPException(403,'External review requires consent')
+    try:
+        steps=validate_board(json.dumps({'steps':payload.steps},ensure_ascii=False))
+    except (ValueError,TypeError,KeyError):
+        raise HTTPException(422,'Invalid visual lesson')
+    return await review(payload.question,steps,payload.author_model)

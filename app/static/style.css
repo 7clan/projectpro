@@ -29,3 +29,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .course-question input,.course-question small{display:block;margin:8px 0}
 #class-code{overflow-wrap:anywhere}
 @media(max-width:530px){#view-quiz select,#view-classroom input:not([type=checkbox]),.course-question input{width:100%}}
+
+.ai-mode-select,#studio-speech-engine{max-width:100%;min-width:0;font:inherit;padding:8px;border:1px solid #c5cfe0;border-radius:8px;background:#fff;color:#253955}
+#provider-panel{margin:8px 0;max-width:100%;overflow-wrap:anywhere}
+#provider-panel summary{cursor:pointer;font-weight:600;color:#253955}
+#provider-results p{margin:8px 0}
+@media(max-width:530px){.ai-mode-select,#studio-speech-engine{width:100%}.studio-controls{max-width:100%;flex-wrap:wrap}}

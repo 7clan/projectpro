@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS classroom_members (
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  joined_at TEXT NOT NULL, PRIMARY KEY(classroom_id,user_id)
 );
+CREATE TABLE IF NOT EXISTS class_assignments (
+ id TEXT PRIMARY KEY, classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+ title TEXT NOT NULL, questions TEXT NOT NULL, created_at TEXT NOT NULL, due_date TEXT
+);
+CREATE TABLE IF NOT EXISTS class_submissions (
+ assignment_id TEXT NOT NULL REFERENCES class_assignments(id) ON DELETE CASCADE,
+ classroom_id TEXT NOT NULL, user_id TEXT NOT NULL, correct INTEGER NOT NULL, total INTEGER NOT NULL,
+ submitted_at TEXT NOT NULL, PRIMARY KEY(assignment_id,user_id),
+ FOREIGN KEY(classroom_id,user_id) REFERENCES classroom_members(classroom_id,user_id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_attempt_user ON attempts(user_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_read_user ON reading_events(user_id,created_at);
 """

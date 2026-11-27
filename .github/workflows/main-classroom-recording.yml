@@ -1,0 +1,52 @@
+name: Main classroom recorded acceptance
+on:
+  push:
+    branches: [audit/main-classroom-recording]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  classroom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TESTED_MAIN_SHA: 401c40e92199bb5b523cf518a53082cb3aeadd41
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 401c40e92199bb5b523cf518a53082cb3aeadd41
+          path: target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r target/requirements-dev.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify pinned main and run existing classroom API tests
+        working-directory: target
+        run: |
+          test "$(git rev-parse HEAD)" = "$TESTED_MAIN_SHA"
+          python -m pytest -q tests/test_course_expansion.py -k 'classroom or teacher_assignment'
+      - name: Record independent teacher and student browser sessions
+        run: |
+          mkdir -p classroom-evidence
+          export CLASSROOM_EVIDENCE="$PWD/classroom-evidence"
+          export DECLIC_DB_PATH="$RUNNER_TEMP/classroom-test.sqlite3"
+          cd target
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >"$CLASSROOM_EVIDENCE/server.log" 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep .5; done
+          PYTHONPATH=. python ../scripts/record_classroom_main.py
+      - name: Convert recordings to MP4
+        if: always()
+        run: |
+          for role in teacher student; do
+            file=$(find classroom-evidence/"$role" -name '*.webm' -print -quit 2>/dev/null || true)
+            if [ -n "$file" ]; then
+              ffmpeg -hide_banner -loglevel error -y -i "$file" -c:v libx264 -pix_fmt yuv420p -movflags +faststart classroom-evidence/"$role".mp4
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-main-classroom-recordings
+          path: classroom-evidence/

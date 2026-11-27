@@ -57,8 +57,15 @@ class Beam:
         return max(points, key=self.moment)
 
     def overview(self, samples=61):
-        xs = [self.length * i / (samples - 1) for i in range(samples)]
         xc = self.critical_x()
+        xs = sorted(set([self.length * i / (samples - 1) for i in range(samples)]+[self.position,xc]))
+        # Preserve the vertical shear jump exactly at a point load. The bending
+        # moment stays continuous at both samples.
+        values=[]
+        for x in xs:
+            if x==self.position and self.load:
+                values.append((x,self.shear(x)+self.load,self.moment(x)))
+            values.append((x,self.shear(x),self.moment(x)))
         return {
             "length": self.length,
             "load": self.load,
@@ -69,9 +76,9 @@ class Beam:
             "total_load": round(self.total_load, 4),
             "max_moment": round(self.moment(xc), 4),
             "max_moment_x": round(xc, 4),
-            "shear": [round(self.shear(x), 4) for x in xs],
-            "moment": [round(self.moment(x), 4) for x in xs],
-            "x": [round(x, 4) for x in xs],
+            "shear": [round(v, 4) for x,v,m in values],
+            "moment": [round(m, 4) for x,v,m in values],
+            "x": [round(x, 4) for x,v,m in values],
         }
 
     def expected_prediction(self):

@@ -8,3 +8,7 @@ data/*.sqlite3
 *.log
 
 voices/
+
+speech-models/
+speech-evidence/
+mode-evidence/

@@ -1,4 +1,4 @@
-name: Main classroom recorded acceptance
+name: Two recorded main workflows - classroom and voice PDF
 on:
   push:
     branches: [audit/main-classroom-recording]
@@ -6,15 +6,19 @@ on:
 permissions:
   contents: read
 jobs:
-  classroom:
+  recorded:
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [classroom, voice_pdf]
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     env:
       TESTED_MAIN_SHA: 401c40e92199bb5b523cf518a53082cb3aeadd41
-      CLASSROOM_LIVE_AI: "1"
       GEMINI_API_KEY: ${{ secrets.GEMEINI }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
       BAZAARLINK_API_KEY: ${{ secrets.SOME }}
+      PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -24,33 +28,53 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r target/requirements-dev.txt playwright
+      - run: pip install -r target/requirements-dev.txt -r target/requirements-voice.txt -r target/requirements-speech.txt playwright
       - run: python -m playwright install --with-deps chromium
-      - name: Verify pinned main and run existing classroom API tests
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth
+      - name: Verify exact main and prepare local speech assets
         working-directory: target
         run: |
           test "$(git rev-parse HEAD)" = "$TESTED_MAIN_SHA"
           python -m pytest -q tests/test_course_expansion.py -k 'classroom or teacher_assignment'
-      - name: Record independent teacher and student browser sessions
+          mkdir -p voices speech-models ../evidence
+          python -m piper.download_voices --data-dir voices en_US-lessac-medium
+          curl -fL --retry 2 https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip -o /tmp/vosk.zip
+          unzip -q /tmp/vosk.zip -d speech-models
+      - name: Generate two synthetic microphone utterances
+        if: matrix.scenario == 'voice_pdf'
+        working-directory: target
         run: |
-          mkdir -p classroom-evidence
-          export CLASSROOM_EVIDENCE="$PWD/classroom-evidence"
-          export DECLIC_DB_PATH="$RUNNER_TEMP/classroom-test.sqlite3"
+          python - <<'PY'
+          import asyncio,pathlib
+          from app.voice import synthesize_preferred
+          for i,text in enumerate(["What is the calibration code in the pendulum experiment?", "Explain how the length of a pendulum affects its period."],1):
+              audio,_,backend=asyncio.run(synthesize_preferred(text,"en",[0]))
+              assert backend=="piper-neural",backend
+              pathlib.Path(f"../evidence/student-question-{i}.wav").write_bytes(audio)
+          PY
+      - name: Actual Chrome video and audio recording
+        run: |
+          export CLASSROOM_EVIDENCE="$PWD/evidence"
+          export DECLIC_DB_PATH="$RUNNER_TEMP/declic-${{ matrix.scenario }}.sqlite3"
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl load-module module-null-sink sink_name=studentmic
+          pactl set-default-sink declic
+          pactl set-default-source studentmic.monitor
           cd target
           python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >"$CLASSROOM_EVIDENCE/server.log" 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep .5; done
-          PYTHONPATH=. python ../scripts/record_classroom_main.py
-      - name: Convert recordings to MP4
+          xvfb-run -a -s "-screen 0 1440x900x24" env PYTHONPATH=. python ../scripts/record_main_${{ matrix.scenario }}.py
+      - name: Verify actual recorded streams
         if: always()
         run: |
-          for role in teacher student; do
-            file=$(find classroom-evidence/"$role" -name '*.webm' -print -quit 2>/dev/null || true)
-            if [ -n "$file" ]; then
-              ffmpeg -hide_banner -loglevel error -y -i "$file" -c:v libx264 -pix_fmt yuv420p -movflags +faststart classroom-evidence/"$role".mp4
-            fi
+          for file in evidence/*.mp4; do
+            [ -f "$file" ] || continue
+            ffprobe -v error -show_entries stream=codec_type,codec_name,duration -of json "$file"
+            ffmpeg -hide_banner -i "$file" -vn -af volumedetect -f null - 2>&1 | grep -E 'mean_volume|max_volume' || true
           done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: DECLIC-main-classroom-recordings
-          path: classroom-evidence/
+          name: DECLIC-main-${{ matrix.scenario }}-video-and-evidence
+          path: evidence/

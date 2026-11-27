@@ -30,8 +30,8 @@ jobs:
           mkdir -p /tmp/pocket
           tar -xzf /tmp/pocket.tar.gz -C /tmp/pocket
           install -m 755 "$(find /tmp/pocket -type f -name pocket-tts | head -1)" voices/pocket/pocket-tts
-          voices/pocket/pocket-tts generate --language english_2026-10 --voice alba --text "Welcome to today's lesson." --output-path /tmp/pocket-warmup.wav
-          voices/pocket/pocket-tts generate --language english_2026-10 --voice george --text "Welcome to today's lesson." --output-path /tmp/pocket-warmup-george.wav
+          voices/pocket/pocket-tts generate --language english_2026-04 --voice alba --text "Welcome to today's lesson." --output-path /tmp/pocket-warmup.wav
+          voices/pocket/pocket-tts generate --language english_2026-04 --voice george --text "Welcome to today's lesson." --output-path /tmp/pocket-warmup-george.wav
       - run: python -m pytest -q && node --check app/static/studio.js
       - name: Record real browser and voice playback
         run: |

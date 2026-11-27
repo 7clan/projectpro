@@ -50,9 +50,9 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     log.info("Model %s finish=%s content_length=%s",d.get("model",model),c.get("finish_reason"),len(c["message"].get("content") or ""))
     return c["message"].get("content") or ""
 
-async def route(prompt,validator,budget=3000):
+async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=7):
     async with httpx.AsyncClient(timeout=30) as client:
-        options=await candidates(client)
+        options=[o for o in await candidates(client) if o[1]!=exclude_model][:max_candidates]
         # Two independent providers/models at most in flight. Never forward keys to unrelated hosts.
         async def try_one(option):
             provider,model,key=option

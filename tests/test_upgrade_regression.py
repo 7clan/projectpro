@@ -55,3 +55,11 @@ def test_router_deadline_returns_safe_fallback(monkeypatch):
     async def fail(*args):raise asyncio.TimeoutError
     monkeypatch.setattr(providers,'_route',fail)
     assert asyncio.run(providers.route("test",lambda x:x)) is None
+
+
+def test_unrelated_offline_question_has_no_fake_beam_lesson(client,auth):
+    r=client.post('/api/studio',headers=auth,json={'question':'Explain the Pythagorean theorem','lang':'en','generative':True})
+    assert r.status_code==200
+    data=r.json()
+    assert data['mode']=='guided_offline'
+    assert data['steps'][0]['scene']=='unavailable'

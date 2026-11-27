@@ -75,7 +75,7 @@ from functools import lru_cache
 _VOICE_LOCK=threading.Lock()
 _VOICE_NAMES={"fr":"fr_FR-siwis-medium","en":"en_US-lessac-medium"}
 _EXTRA_VOICES={"en_US-amy-medium":"en","en_US-ryan-medium":"en","en_GB-alba-medium":"en","fr_FR-tom-medium":"fr"}
-_KOKORO_VOICES={"kokoro-heart":"af_heart","kokoro-bella":"af_bella","kokoro-michael":"am_michael"}
+_KOKORO_VOICES={"kokoro-heart":"af_heart","kokoro-bella":"af_bella","kokoro-michael":"am_michael","kokoro-bella-smooth":"af_bella","kokoro-michael-smooth":"am_michael"}
 def _kokoro_paths():
     directory=Path(os.getenv("DECLIC_KOKORO_DIR",str(Path(__file__).resolve().parents[1]/"voices"/"kokoro")))
     return directory/"kokoro-v1.0.onnx",directory/"voices-v1.0.bin"
@@ -95,10 +95,39 @@ def _kokoro_model(model_path,voices_path):
     session=ort.InferenceSession(model_path,sess_options=options,providers=["CPUExecutionProvider"])
     return Kokoro.from_session(session,voices_path)
 
+def _soften_kokoro_pauses(samples,rate=24000):
+    """Reduce only sustained low-energy pauses; preserve samples and cue timing."""
+    import numpy as np
+    samples=np.asarray(samples,dtype=np.float32).reshape(-1)
+    # 20 ms RMS windows, requiring 160 ms of sustained quiet. Protect 40 ms
+    # beside speech; ramp attenuation instead of a hard gate or deleting samples.
+    block=rate//50
+    count=len(samples)//block
+    if count<8:return samples.copy()
+    frames=samples[:count*block].reshape(count,block)
+    rms=np.sqrt(np.mean(frames*frames,axis=1))
+    quiet=rms<10**(-48/20)
+    edges=np.flatnonzero(np.diff(np.r_[False,quiet,False]))
+    gain=np.ones(len(samples),dtype=np.float32)
+    for start,end in zip(edges[::2],edges[1::2]):
+        if end-start<8:continue
+        a=(start+2)*block
+        b=(end-2)*block
+        ramp=min(block*2,(b-a)//2)
+        if ramp<1:continue
+        floor=np.float32(10**(-18/20))
+        gain[a:a+ramp]=1-(1-floor)*(.5-.5*np.cos(np.linspace(0,np.pi,ramp)))
+        gain[a+ramp:b-ramp]=floor
+        gain[b-ramp:b]=floor+(1-floor)*(.5-.5*np.cos(np.linspace(0,np.pi,ramp)))
+    return samples*gain
+
 def _kokoro_render(text,lang,cues,voice_name):
     import numpy as np
     if not _kokoro_available():raise FileNotFoundError("Kokoro voice model not installed")
+    smooth=voice_name.endswith("-smooth")
     chunks=split_cues(text,cues)
+    # Prefer sentence-sized narration in smooth mode when the cue plan has
+    # only one reveal. Keep multi-cue grouping/timing for animated examples.
     # Keep longer phrases for prosody; all original cue keys remain represented.
     while len(chunks)>1 and (len(chunks)>3 or any(len(x[0].split())<6 for x in chunks)):
         i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
@@ -110,10 +139,11 @@ def _kokoro_render(text,lang,cues,voice_name):
         with wave.open(output,"wb") as w:
             w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
             for fragment,positions in chunks:
-                samples,rate=model.create(fragment,voice=_KOKORO_VOICES[voice_name],speed=1.0,lang="en-us")
+                samples,rate=model.create(fragment,voice=_KOKORO_VOICES[voice_name],speed=.94 if smooth else 1.0,lang="en-us")
                 samples=np.asarray(samples,dtype=np.float32).reshape(-1)
                 if rate!=24000 or samples.size<2400 or not np.isfinite(samples).all() or np.max(np.abs(samples))<.001:
                     raise ValueError("Invalid Kokoro audio")
+                if smooth:samples=_soften_kokoro_pauses(samples,rate)
                 raw=(np.clip(samples,-1,1)*32767).astype("<i2").tobytes()
                 marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
                 w.writeframes(raw);offset+=samples.size

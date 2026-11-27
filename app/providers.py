@@ -14,9 +14,9 @@ async def candidates(client):
             r=await client.get("https://generativelanguage.googleapis.com/v1beta/models",headers={"x-goog-api-key":key},params={"pageSize":100})
             r.raise_for_status()
             names=[m["name"].removeprefix("models/") for m in r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[]) and "flash" in m["name"] and not any(x in m["name"] for x in ("image","audio","tts","live","thinking"))]
-            names.sort(key=lambda n:("lite" not in n,"preview" in n),reverse=False)
+            names.sort(key=lambda n:(("latest" in n),("2.5" not in n),("lite" not in n),("preview" not in n)),reverse=True)
             log.info("Gemini discovered %d eligible models",len(names))
-            for n in names[:2]: result.append(("gemini",n,key))
+            for n in names[:4]: result.append(("gemini",n,key))
         except (httpx.HTTPError,KeyError,ValueError) as e:
             log.warning("Gemini discovery failed: %s",type(e).__name__)
     key=os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")
@@ -33,15 +33,16 @@ async def candidates(client):
             log.info("OpenRouter discovered %d free models",len(free))
         except (httpx.HTTPError,KeyError,ValueError):
             free=[]
-        for n in dict.fromkeys(explicit+free[:4]+["openrouter/free"]):
+        for n in dict.fromkeys(explicit+free[:5]+["openrouter/free"]):
             result.append(("openrouter",n,key))
-    return result[:7]
+    return result[:10]
 
 async def complete(client,provider,model,key,prompt,budget=3000):
     if provider=="gemini":
-        r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.4,"maxOutputTokens":budget,"responseMimeType":"application/json"}})
+        r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.4,"maxOutputTokens":max(6000,budget),"responseMimeType":"application/json"}})
         r.raise_for_status()
         d=r.json()
+        log.info("Gemini model %s finish=%s",model,[c.get("finishReason") for c in d.get("candidates",[])])
         text=" ".join(p.get("text","") for c in d.get("candidates",[]) for p in c.get("content",{}).get("parts",[]) if not p.get("thought"))
         return text
     r=await client.post("https://openrouter.ai/api/v1/chat/completions",headers={"Authorization":"Bearer "+key,"X-Title":"Declic whiteboard"},json={"model":model,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":budget})
@@ -50,7 +51,7 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     log.info("Model %s finish=%s content_length=%s",d.get("model",model),c.get("finish_reason"),len(c["message"].get("content") or ""))
     return c["message"].get("content") or ""
 
-async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=7):
+async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10):
     async with httpx.AsyncClient(timeout=30) as client:
         options=[o for o in await candidates(client) if o[1]!=exclude_model][:max_candidates]
         # Two independent providers/models at most in flight. Never forward keys to unrelated hosts.
@@ -61,7 +62,7 @@ async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=7
                 return validator(raw),provider,model
             except (httpx.HTTPError,ValueError,KeyError,TypeError,IndexError,AttributeError) as e:
                 status=e.response.status_code if isinstance(e,httpx.HTTPStatusError) else None
-                log.warning("Provider %s model=%s failed %s status=%s",provider,model,type(e).__name__,status)
+                log.warning("Provider %s model=%s failed %s status=%s detail=%s",provider,model,type(e).__name__,status,str(e)[:80] if type(e) is ValueError else "")
                 return None
         for i in range(0,len(options),2):
             tasks=[asyncio.create_task(try_one(o)) for o in options[i:i+2]]

@@ -10,14 +10,22 @@ def _plain(text):
 
 def is_followup(question):
     q=_plain(question)
-    return bool(re.fullmatch(r"(?:please )?(?:(?:could|can|would) you )?(?:explain(?: (?:it|that|this))? (?:more|further|again|in more detail)|tell me more|elaborate(?: on (?:that|this|it))?|continue|go on|why|how|what about (?:it|that)|how (?:is|can|do) (?:it|this|that|we|you) (?:be )?used(?: in real life)?|give (?:me )?(?:an|another) example|explique(?: encore| davantage| plus| mieux)|peux-tu expliquer(?: davantage| plus| mieux)|pourquoi|comment|continue|donne(?:-moi)? un exemple)",q))
+    return bool(re.fullmatch(r"(?:please )?(?:(?:could|can|would) you )?(?:explain(?: (?:it|that|this))? (?:more|further|again|in more detail)|tell me more|elaborate(?: on (?:that|this|it))?|continue|go on|why|how|what about (?:it|that)|how (?:is|can|do) (?:it|this|that|we|you) (?:be )?used(?: in real life)?|explain how (?:this|that|the) (?:theorem|concept|formula|law|method) is used(?: in real life)?|give (?:me )?(?:an|another) example|explique(?: encore| davantage| plus| mieux)|peux-tu expliquer(?: davantage| plus| mieux)|pourquoi|comment|continue|donne(?:-moi)? un exemple)",q))
 
 def resolve_turn(question,history):
     """Return effective question and context; standalone requests are independent."""
-    if not is_followup(question):
+    correction=re.search(r"\b(?:only talking about|only asking about|only interested in|je parle seulement de)\s+(.+?)(?:\s+and not\s+|\s+not\s+|\s+et non\s+|$)",_plain(question))
+    if not is_followup(question) and not correction:
         return question,[]
     anchor=next((t.get("text","") for t in reversed(history) if t.get("role")=="student" and t.get("text") and not is_followup(t["text"])),None)
     if not anchor:return question,[]
+    if correction:
+        # A correction can retain a live-data request about the same subject,
+        # but never resurrect a different topic.
+        subject=correction.group(1).strip()
+        if subject and re.search(r"\b"+re.escape(subject)+r"\b",_plain(anchor)) and needs_fresh_data(anchor):
+            return question+"\nRequested information: "+anchor,[]
+        return question,[]
     return question+"\nTopic of this follow-up: "+anchor,[{"role":"student","text":anchor}]
 
 def needs_fresh_data(question):

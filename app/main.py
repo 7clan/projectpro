@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from .ai import ai_status, coach, fallback_help, search_sources
+from .providers import use_mode,configured_modes
 from .engine import Beam, CONCEPTS, MISTAKES_EN, MISTAKES_FR, explanation_check
 from .learning import RESOURCES, profile, resources_for, study_plan
 from .storage import (
@@ -114,6 +115,7 @@ class CoachRequest(BaseModel):
     lang: str = Field(default='fr',pattern='^(fr|en)$')
     reveal: bool = False
     consent_external: bool = False
+    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid)$')
 
 
 class ReadingEvent(BaseModel):
@@ -171,7 +173,7 @@ def homepage():
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'0.1.0','calculation_engine':'deterministic','ai':{**ai_status(),'local_only':local_generation_allowed()}}
+    return {'status':'ok','version':'0.1.0','calculation_engine':'deterministic','ai':{**ai_status(),'local_only':local_generation_allowed(),'modes':configured_modes()}}
 
 
 @app.post('/api/auth/register', status_code=201)
@@ -473,11 +475,13 @@ async def tutor(payload:CoachRequest,user=Depends(user_from_token)):
         return {'mode':'guided_offline','answer':'Termine ton essai indépendant avant de demander une aide liée à cet exercice.' if payload.lang=='fr' else 'Finish your independent attempt before requesting help with this exercise.','sources':[],'notice':'Évaluation indépendante' if payload.lang=='fr' else 'Independent assessment'}
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
-    if ai_status()["enabled"] and not payload.consent_external and not local_generation_allowed():
-        result=fallback_help(payload.question,b,payload.lang,sources)
-        result["notice"] = "Aucune donnée envoyée à un fournisseur IA sans consentement explicite." if payload.lang=="fr" else "No data sent to an AI provider without explicit consent."
-        return result
-    return await coach(payload.question,b,payload.lang,sources,reveal=attempted)
+    with use_mode(payload.ai_mode,payload.consent_external) as effective:
+        if effective=="disabled":
+            result=fallback_help(payload.question,b,payload.lang,sources)
+            result["notice"]="Aucun partage externe sans consentement." if payload.lang=="fr" else "No external sharing without consent."
+            return result
+        return await coach(payload.question,b,payload.lang,sources,reveal=attempted)
+
 
 
 class StudioTurn(BaseModel):
@@ -489,6 +493,7 @@ class StudioRequest(BaseModel):
     challenge_id: str | None = None
     lang: str = Field(default='fr',pattern='^(fr|en)$')
     consent_external: bool = False
+    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid)$')
     history: list[StudioTurn] = Field(default_factory=list,max_length=8)
     generative: bool = False
 
@@ -503,16 +508,19 @@ async def studio(payload:StudioRequest,request:Request,user=Depends(user_from_to
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
     history=[x.model_dump() for x in payload.history]
-    if payload.generative and (payload.consent_external or local_generation_allowed()):
-        from .whiteboard import generate
-        result=await until_disconnect(request,generate(payload.question,payload.lang,sources,history))
-        if result is not None:
-            return result
-    result=await until_disconnect(request,teach(payload.question,b,payload.lang,sources,history,payload.consent_external or local_generation_allowed()))
-    result['visual_mode']='predefined'
-    if payload.generative:
-        result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'
-    return result
+    with use_mode(payload.ai_mode,payload.consent_external) as effective:
+        enabled=effective!="disabled" and ai_status()["enabled"]
+        if payload.generative and enabled:
+            from .whiteboard import generate
+            result=await until_disconnect(request,generate(payload.question,payload.lang,sources,history))
+            if result is not None:
+                return result
+        result=await until_disconnect(request,teach(payload.question,b,payload.lang,sources,history,enabled))
+        result['visual_mode']='predefined'
+        if payload.generative:
+            result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'
+        return result
+
 
 
 @app.post('/api/studio/audio')
@@ -527,7 +535,7 @@ async def studio_audio(payload: dict, request:Request,user=Depends(user_from_tok
     if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en') or not isinstance(cues,list) or len(cues)>32:
         raise HTTPException(422,'Invalid narration')
     try:
-        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True),45))
+        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True and payload.get('ai_mode')!='local'),45))
     except (ValueError,TypeError):
         raise HTTPException(422,'Invalid narration or cue')
     except (FileNotFoundError,asyncio.TimeoutError):
@@ -539,19 +547,21 @@ class StudioReviewRequest(BaseModel):
     steps: list[dict] = Field(min_length=2,max_length=5)
     author_model: str = Field(min_length=1,max_length=200)
     consent_external: bool = False
+    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid)$')
 
 @app.post('/api/studio/review')
 async def studio_review(payload:StudioReviewRequest,user=Depends(user_from_token)):
     import json
     from .whiteboard import validate_board
     from .reviewer import review
-    if not payload.consent_external:
+    if not payload.consent_external and payload.ai_mode!='local' and not local_generation_allowed():
         raise HTTPException(403,'External review requires consent')
     try:
         steps=validate_board(json.dumps({'steps':payload.steps},ensure_ascii=False))
     except (ValueError,TypeError,KeyError):
         raise HTTPException(422,'Invalid visual lesson')
-    return await review(payload.question,steps,payload.author_model)
+    with use_mode(payload.ai_mode,payload.consent_external):
+        return await review(payload.question,steps,payload.author_model)
 
 
 @app.delete('/api/documents/{document_id}')

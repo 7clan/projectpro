@@ -115,7 +115,7 @@ class CoachRequest(BaseModel):
     lang: str = Field(default='fr',pattern='^(fr|en)$')
     reveal: bool = False
     consent_external: bool = False
-    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid)$')
+    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid|ollama_cloud)$')
 
 
 class ReadingEvent(BaseModel):
@@ -494,7 +494,7 @@ class StudioRequest(BaseModel):
     challenge_id: str | None = None
     lang: str = Field(default='fr',pattern='^(fr|en)$')
     consent_external: bool = False
-    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid)$')
+    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid|ollama_cloud)$')
     history: list[StudioTurn] = Field(default_factory=list,max_length=8)
     generative: bool = False
 
@@ -548,7 +548,7 @@ class StudioReviewRequest(BaseModel):
     steps: list[dict] = Field(min_length=2,max_length=5)
     author_model: str = Field(min_length=1,max_length=200)
     consent_external: bool = False
-    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid)$')
+    ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid|ollama_cloud)$')
 
 @app.post('/api/studio/review')
 async def studio_review(payload:StudioReviewRequest,user=Depends(user_from_token)):

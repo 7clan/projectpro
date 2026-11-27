@@ -41,6 +41,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title='DÉCLIC — Adaptive Learning', version='0.1.0', lifespan=lifespan)
+from .pilot_security import PilotSecurity
+app.add_middleware(PilotSecurity)
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 

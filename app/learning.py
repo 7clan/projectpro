@@ -51,3 +51,18 @@ def profile(user_id, exam_date=None):
 def resources_for(profile_data):
     target=profile_data["priority"]["concept"]
     return sorted(RESOURCES,key=lambda r: 0 if r["topic"]==target else 1)
+
+def study_plan(profile_data, minutes=30):
+    """Allocate a bounded daily session from observed evidence, not a grade forecast."""
+    minutes=max(10,min(120,int(minutes)))
+    ordered=sorted(profile_data["concepts"],key=lambda c:(c["mastery"] if c["mastery"] is not None else 42,-c["importance"],c["id"]))
+    urgent=profile_data["priority"]["urgency"]=="urgent"
+    first,second=ordered[:2]
+    review=max(3,round(minutes*.3))
+    practice=max(4,round(minutes*(.5 if urgent else .4)))
+    recall=minutes-review-practice
+    return {"minutes":minutes,"urgent":urgent,"tasks":[
+      {"concept":first["id"],"minutes":review,"fr":"Revoir : "+first["fr"],"en":"Review: "+first["en"],"view":"discover"},
+      {"concept":first["id"],"minutes":practice,"fr":"Pratiquer : "+first["fr"],"en":"Practice: "+first["en"],"view":"lab"},
+      {"concept":second["id"],"minutes":recall,"fr":"Expliquer et se tester : "+second["fr"],"en":"Explain and self-test: "+second["en"],"view":"studio"}
+    ],"note_fr":"Plan indicatif fondé sur les essais récents, pas une prédiction de note.","note_en":"Suggested plan based on recent attempts, not a grade prediction."}

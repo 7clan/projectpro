@@ -60,19 +60,38 @@ jobs:
           pactl load-module module-null-sink sink_name=declic
           pactl load-module module-null-sink sink_name=studentmic
           pactl set-default-sink declic
-          pactl set-default-source studentmic.monitor
+          pactl load-module module-remap-source master=studentmic.monitor source_name=declicmic source_properties=device.description=Declic_Test_Microphone
+          pactl set-default-source declicmic
+          pactl list short sources
+          pactl list short sinks
+          export PULSE_SOURCE=declicmic
+          export PULSE_SINK=declic
           cd target
           python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >"$CLASSROOM_EVIDENCE/server.log" 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep .5; done
+          set +e
           xvfb-run -a -s "-screen 0 1440x900x24" env PYTHONPATH=. python ../scripts/record_main_${{ matrix.scenario }}.py
+          code=$?
+          tail -n 80 "$CLASSROOM_EVIDENCE/server.log"
+          exit "$code"
       - name: Verify actual recorded streams
         if: always()
         run: |
           for file in evidence/*.mp4; do
             [ -f "$file" ] || continue
             ffprobe -v error -show_entries stream=codec_type,codec_name,duration -of json "$file"
-            ffmpeg -hide_banner -i "$file" -vn -af volumedetect -f null - 2>&1 | grep -E 'mean_volume|max_volume' || true
+            ffmpeg -hide_banner -i "$file" -vn -af volumedetect -f null - 2>&1 | grep -E 'mean_volume|max_volume' | tee -a evidence/recording-volume.txt
           done
+      - name: Require audible recording, not merely an audio stream
+        if: always()
+        run: |
+          python - <<'PY'
+          import pathlib,re
+          p=pathlib.Path("evidence/recording-volume.txt")
+          assert p.exists(), "No recorded audio measurement"
+          peaks=re.findall(r"max_volume:\s*(-?[0-9.]+) dB",p.read_text())
+          assert peaks and all(float(x)>-40 for x in peaks), f"Silent or inaudible recording: {peaks}"
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

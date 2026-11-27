@@ -18,7 +18,11 @@ def speak(page,path):
     page.locator("#studio-speech-engine").select_option("vosk")
     page.locator("#studio-auto-send").check()
     page.locator("#studio-mic").click()
-    expect(page.locator("#studio-status")).to_contain_text("Vosk",timeout=25000)
+    try:
+        expect(page.locator("#studio-status")).to_contain_text("Vosk",timeout=25000)
+    except Exception:
+        print("MICROPHONE STATUS",page.locator("#studio-status").inner_text(),"EVENTS",events[count:],flush=True)
+        raise
     with page.expect_response(lambda r:r.request.method=="POST" and r.url.endswith("/api/studio"),timeout=150000) as event:
         play=subprocess.Popen(["paplay","--device=studentmic",str(path)])
         play.wait(timeout=25)
@@ -57,6 +61,9 @@ with sync_playwright() as p:
         wait(page,"state.reader && !state.readerLoading && document.querySelector('#reader-image').naturalWidth>0")
         check("Actual PDF uploaded through browser",doc.get("id") is not None)
         shot(page,"01-pdf-uploaded")
+        devices=page.evaluate("async () => (await navigator.mediaDevices.enumerateDevices()).map(d=>({kind:d.kind,label:d.label}))")
+        print("BROWSER AUDIO DEVICES",json.dumps(devices),flush=True)
+        check("Chromium recognizes a virtual microphone",any(d["kind"]=="audioinput" for d in devices),devices=devices)
         studio_settings(page,True,True)
         prev=len(audio)
         lesson=speak(page,OUT/"student-question-1.wav")

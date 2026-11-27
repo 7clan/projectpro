@@ -19,9 +19,9 @@ def open_assignments(page):
 def publish(page,title):
     open_assignments(page)
     expect(page.locator("#assignment-panel")).to_contain_text("Teacher identity unverified")
-    page.get_by_label("Assignment title").fill(title)
-    page.get_by_label("Suggested due date").fill("2026-12-01")
-    page.get_by_label("Difficulty").select_option("easy")
+    page.locator("#assignment-panel").get_by_label("Assignment title",exact=True).fill(title)
+    page.locator("#assignment-panel").get_by_label("Suggested due date",exact=True).fill("2026-12-01")
+    page.locator("#assignment-panel").get_by_label("Difficulty",exact=True).select_option("easy")
     a=response(page,"POST",base+"/assignments",lambda:page.get_by_role("button",name="Publish 6 MCQs").click(),201)
     expect(page.locator("#assignment-panel")).to_contain_text(title)
     assert a["count"]==6

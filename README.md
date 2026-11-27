@@ -206,7 +206,7 @@ Reopen Live Studio, choose **Piper · local**, and select an installed **Voice p
 
 ### Optional Kokoro English narration
 
-Kokoro provides three English candidates (Heart, Bella and Michael). It is independent of Ollama and cloud APIs. Existing Piper and cloud voices remain unchanged. Install only if you want to try these voices:
+Kokoro provides Michael and an optional smooth Michael profile (slightly slower delivery and quiet-gap attenuation). It is independent of Ollama and cloud APIs. Existing Piper and cloud voices remain unchanged. Install only if you want to try these voices:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install kokoro-onnx==0.6.0
@@ -216,3 +216,8 @@ curl.exe -fL --retry 2 https://github.com/thewh1teagle/kokoro-onnx/releases/down
 ```
 
 Restart DÉCLIC, use an English lesson, select the local speech engine and choose a Kokoro voice profile. The models are loaded lazily and the ONNX session uses two CPU inference threads. The model download is optional and stored in the ignored voices folder. Cue groups can share a phrase-start timestamp to keep longer, more natural phrases. The upstream model is Apache-2.0 and the ONNX library is MIT: https://github.com/thewh1teagle/kokoro-onnx.
+
+
+### Optional Pocket TTS comparison
+
+Two experimental English voice profiles, Pocket Alba and Pocket George, use Kyutai's standalone runtime. Download the official v4.0.1 Windows x86_64 archive from https://github.com/kyutai-labs/pocket-tts/releases/tag/v4.0.1 and extract the executable to `voices/pocket/pocket-tts.exe`. Initialize the model and each voice with the official CLI before use. This first initialization requires Internet access to fetch the public pretrained model and voice assets; subsequent inference is performed on the CPU. The application does not send narration to a TTS API. No arbitrary reference voice or user-provided executable path is accepted. Use the supplied voice identifiers, not personal voice recordings. Model and voice attribution: https://huggingface.co/kyutai/pocket-tts-without-voice-cloning and https://huggingface.co/kyutai/tts-voices. Quality and startup latency must be evaluated before enabling by default.

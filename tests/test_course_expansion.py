@@ -138,3 +138,80 @@ def test_local_mode_rejects_cloud_model(monkeypatch):
     monkeypatch.setenv("DECLIC_LOCAL_ONLY","1")
     monkeypatch.setenv("DECLIC_OLLAMA_MODEL","example:cloud")
     assert asyncio.run(providers.candidates(None))==[]
+
+
+def test_concept_quizzes_and_teacher_assignment_workflow(client,auth,monkeypatch):
+    from app.storage import one
+    student={"Authorization":"Bearer "+client.post("/api/auth/demo").json()["token"]}
+    stranger={"Authorization":"Bearer "+client.post("/api/auth/demo").json()["token"]}
+    quiz=client.post("/api/quizzes",headers=student,json={"kind":"conceptual","count":8,"difficulty":"hard","lang":"en"})
+    assert quiz.status_code==201,quiz.text
+    data=quiz.json()
+    assert len(data["questions"])==8
+    assert all(len(set(q["options"]))==4 and "answer" not in q and q["difficulty"]=="hard" for q in data["questions"])
+    qs=json.loads(one("SELECT questions FROM quizzes WHERE id=?",(data["id"],))["questions"])
+    assert client.post("/api/quizzes/"+data["id"]+"/submit",headers=student,json={"answers":{q["id"]:q["answer"] for q in qs}}).json()["correct"]==8
+    c=client.post("/api/classrooms",headers=auth,json={"name":"Statics"}).json()
+    base="/api/classrooms/"+c["id"]
+    assert client.post("/api/classrooms/join",headers=student,json={"code":c["join_code"],"consent":True}).status_code==200
+    monkeypatch.setenv("DECLIC_REQUIRE_APPROVED_TEACHER","1")
+    assert client.post(base+"/assignments",headers=auth,json={"title":"Practice"}).status_code==403
+    uid=client.get("/api/me",headers=auth).json()["id"]
+    monkeypatch.setenv("DECLIC_APPROVED_TEACHER_IDS",uid)
+    assert client.get("/api/teacher/status",headers=auth).json()["operator_approved"]
+    a=client.post(base+"/assignments",headers=auth,json={"title":"Practice","count":4,"difficulty":"hard"})
+    assert a.status_code==201,a.text
+    url=base+"/assignments/"+a.json()["id"]
+    assert client.get(url,headers=stranger).status_code==404
+    assert client.get(url+"/report",headers=student).status_code==404
+    q=client.get(url,headers=student).json()["questions"]
+    assert all("answer" not in x for x in q)
+    saved=json.loads(one("SELECT questions FROM class_assignments WHERE id=?",(a.json()["id"],))["questions"])
+    payload={"answers":{x["id"]:x["answer"] for x in saved}}
+    assert client.post(url+"/submit",headers=student,json=payload).json()["correct"]==4
+    assert client.post(url+"/submit",headers=student,json=payload).status_code==409
+    assert client.get(url+"/report",headers=auth).json()["submissions"][0]["correct"]==4
+    assert client.delete(base+"/membership",headers=student).status_code==200
+    assert client.get(url+"/report",headers=auth).json()["submissions"]==[]
+
+def test_local_semantic_scene_compilation():
+    from app.local_board import compile_plan
+    scenes=[{"title":"Triangle","speech":"Trois au carré plus quatre au carré égale vingt-cinq.","formula":"9 + 16 = 25","diagram":"triangle","a":3,"b":4,"label1":"a","label2":"b","label3":"c"},{"title":"Force","speech":"Une force de six newtons sur deux kilogrammes donne trois mètres par seconde carrée.","formula":"6 / 2 = 3","diagram":"force","a":2,"b":6,"label1":"m","label2":"F","label3":"a"}]
+    steps,checks=compile_plan(json.dumps({"scenes":scenes}))
+    assert len(steps)==2 and len(checks)>=4
+    assert any(o.get("text")=="a = 3 m/s²" for o in steps[1]["objects"])
+    scenes[1]["formula"]="6 / 2 = 4"
+    with pytest.raises(ValueError):compile_plan(json.dumps({"scenes":scenes}))
+
+def test_exact_shear_jump():
+    from app.engine import Beam
+    b=Beam(8,12,2.3,2)
+    plot=b.overview()
+    indexes=[i for i,x in enumerate(plot["x"]) if x==2.3]
+    assert len(indexes)==2
+    a,c=indexes
+    assert abs(plot["shear"][a]-plot["shear"][c]-12)<1e-6
+    assert plot["moment"][a]==plot["moment"][c]
+    assert plot["max_moment"] in plot["moment"]
+
+def test_pilot_security_headers_and_limits(client,monkeypatch):
+    monkeypatch.setenv("DECLIC_PILOT_LIMITS","1")
+    r=client.get("/api/health")
+    assert r.headers["x-frame-options"]=="DENY"
+    assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+    assert r.headers["cache-control"]=="no-store"
+    for i in range(12):
+        assert client.post("/api/auth/demo").status_code==200
+    assert client.post("/api/auth/demo").status_code==429
+
+@pytest.mark.skipif(not shutil.which("tesseract"),reason="Tesseract not installed")
+def test_mixed_scan_with_native_header(client,auth,monkeypatch):
+    monkeypatch.setenv("DECLIC_OCR_LANG","eng")
+    with fitz.open(stream=make_scan(),filetype="pdf") as pdf:
+        p=pdf[0];p.insert_text((30,190),"Page 1",fontsize=10)
+        raw=pdf.tobytes()
+    r=client.post("/api/documents",headers=auth,files={"file":("mixed.pdf",raw,"application/pdf")})
+    assert r.status_code==201,r.text
+    assert r.json()["extraction"][0]["method"]=="mixed_ocr"
+    content=client.get("/api/documents/"+r.json()["id"]+"/pages/0/text",headers=auth).json()["content"]
+    assert "Page 1" in content and "Acceleration" in content

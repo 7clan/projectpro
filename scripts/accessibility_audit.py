@@ -8,7 +8,7 @@ results={}
 with sync_playwright() as p:
     browser=p.chromium.launch()
     for width,height in [(1440,900),(390,844)]:
-        ctx=browser.new_context(viewport={"width":width,"height":height})
+        ctx=browser.new_context(viewport={"width":width,"height":height},reduced_motion="reduce")
         page=ctx.new_page()
         page.goto("http://127.0.0.1:8000")
         expect(page.get_by_role("dialog")).to_be_visible()
@@ -21,6 +21,7 @@ with sync_playwright() as p:
             page.locator('[data-view="'+view+'"]').click()
             section=page.locator("#view-"+view)
             expect(section).to_be_visible()
+            page.wait_for_timeout(350)
             # Browser-native accessible roles, names, and text, not simulated speech.
             snapshot=section.aria_snapshot()
             (out/(str(width)+"-"+view+".aria.txt")).write_text(snapshot,encoding="utf-8")

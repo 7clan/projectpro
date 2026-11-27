@@ -130,7 +130,7 @@ const {backend,marks,blob}=saved;svg.dataset.voiceBackend=backend;by('studio-voi
 function interrupt(){stop();ui.turn++;if(ui.request)ui.request.abort();ui.request=null;ui.busy=false;by('studio-send').disabled=false;by('studio-status').textContent=say('Interrompu. Pose ta prochaine question.','Interrupted. Ask your next question.');}
 async function submit(e){e.preventDefault();const q=by('studio-question').value.trim();if(q.length<3)return;if(ui.busy)interrupt();stop();const turn=++ui.turn;const controller=new AbortController();ui.request=controller;narrationCache.clear();ui.busy=true;by('studio-send').disabled=true;by('studio-status').textContent=say('Préparation de la leçon…','Preparing your lesson…');add('student',q);by('studio-question').value='';try{const result=await api('/api/studio',{method:'POST',signal:controller.signal,body:JSON.stringify({question:q,challenge_id:state.challenge?.id||null,lang:state.language,history:ui.history.slice(-8),consent_external:by('studio-consent').checked,generative:by('studio-generative').checked})});if(turn!==ui.turn)return;ui.steps=result.steps;ui.index=0;ui.lessonLang=state.language;const answer=result.steps.map(x=>x.narration).join('\n\n');add('tutor',answer);ui.history.push({role:'student',text:q},{role:'tutor',text:answer.slice(0,1600)});ui.history=ui.history.slice(-8);by('studio-mode').textContent=result.visual_mode==='generated'?'AI · GENERATED':result.mode==='live_ai'?'AI · LIVE':say('Guide local','Local guide');by('studio-status').textContent=result.notice+(result.numerical_checks?.length?say(' · '+result.numerical_checks.length+' contrôle(s) numérique(s), pas une validation complète.',' · '+result.numerical_checks.length+' numerical check(s), not full validation.'):'');if(result.sources.length)renderSourceLinks(by('studio-sources'),result.sources);else by('studio-sources').textContent=say('Aucun extrait pertinent retrouvé.','No relevant course excerpt retrieved.');if(state.currentView==='studio')play();else render();if(result.visual_mode==='generated'&&result.model&&by('studio-consent').checked){const reviewNotice=by('studio-status');const original=reviewNotice.textContent;const lesson=ui.steps;api('/api/studio/review',{method:'POST',body:JSON.stringify({question:q,steps:result.steps,author_model:result.model,consent_external:true})}).then(r=>{if(ui.steps!==lesson||turn!==ui.turn||!by('studio-consent').checked)return;reviewNotice.textContent=original+' · '+(r.verdict==='pass'?say('Relecture IA sans erreur signalée (non preuve)','AI review found no issues (not proof)'):r.verdict==='revise'?say('À vérifier : ','Review flagged: ')+r.issues.join(' / '):say('Relecture indisponible','Review unavailable'));}).catch(()=>{});}}catch(err){if(turn!==ui.turn)return;by('studio-status').textContent=err.message;if(!by('studio-question').value)by('studio-question').value=q;add('tutor',say('Impossible de charger la leçon. Réessaie.','Unable to load the lesson. Try again.'));}finally{if(turn===ui.turn){ui.request=null;ui.busy=false;by('studio-send').disabled=false;}}}
 by('studio-form').addEventListener('submit',submit);
-by('studio-interrupt').onclick=()=>{if(ui.recognition)ui.recognition.abort();interrupt();};
+by('studio-interrupt').onclick=()=>{if(ui.recognition){const r=ui.recognition;ui.recognition=null;r.abort();by('studio-mic').textContent='● Micro';}interrupt();};
 by('studio-play').onclick=()=>ui.playing?stop():play();
 by('studio-prev').onclick=()=>{stop();if(ui.index>0)ui.index--;render();};
 by('studio-next').onclick=()=>{stop();if(ui.index+1<ui.steps.length)ui.index++;render();};
@@ -140,6 +140,50 @@ by('studio-voice-engine').onchange=()=>{if(by('studio-voice-engine').value==='cl
 by('studio-clear').onclick=()=>{interrupt();narrationCache.clear();ui.history=[];ui.steps=[];ui.index=0;by('studio-chatlog').replaceChildren();by('studio-steps').replaceChildren();by('studio-caption').textContent=say('Pose une question pour démarrer.','Ask a question to begin.');by('studio-title').textContent='RDM2';by('studio-formula').textContent='ΣF = 0';by('studio-count').textContent='0 / 0';by('studio-sources').textContent='';by('studio-mode').textContent='Ready';['studio-prev','studio-next','studio-play'].forEach(id=>by(id).disabled=true);draw();};
 document.querySelectorAll('[data-studio-prompt]').forEach(b=>b.onclick=()=>{by('studio-question').value=b.dataset.studioPrompt;by('studio-question').focus();});
 by('studio-mic').onclick=()=>{const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition){by('studio-status').textContent=say('Micro non pris en charge. Utilise le clavier.','Speech recognition unavailable. Use the keyboard.');return;}if(ui.recognition){ui.recognition.stop();return;}interrupt();let finalText='',failed=false;const r=new Recognition();r.lang=fr()?'fr-FR':'en-US';r.interimResults=true;r.continuous=false;ui.recognition=r;r.onstart=()=>{by('studio-mic').textContent='■ Stop mic';by('studio-status').textContent=say('Je t’écoute…','Listening…');};r.onresult=e=>{const results=Array.from(e.results);finalText=results.filter(x=>x.isFinal).map(x=>x[0].transcript).join(' ').slice(0,800);by('studio-question').value=results.map(x=>x[0].transcript).join(' ').slice(0,800);};r.onerror=()=>{failed=true;by('studio-status').textContent=say('Micro indisponible. Vérifie les permissions.','Microphone unavailable. Check permissions.');};r.onend=()=>{if(ui.recognition!==r)return;ui.recognition=null;by('studio-mic').textContent='● Micro';if(!failed&&by('studio-auto-send').checked&&state.currentView==='studio'&&finalText.trim().length>=3){by('studio-question').value=finalText;by('studio-form').requestSubmit();}};try{r.start();}catch{ui.recognition=null;}};
+// Experimental acoustic barge-in: local amplitude analysis only. Speech
+// recognition itself may use the browser vendor's network service.
+let bargeStream=null,bargeContext=null,bargeTimer=null,bargeRevision=0;
+const bargeBox=by('studio-barge'),bargeStatus=by('studio-barge-status');
+function closeBarge(){
+ bargeRevision++;clearInterval(bargeTimer);bargeTimer=null;
+ if(bargeStream)bargeStream.getTracks().forEach(t=>t.stop());bargeStream=null;
+ if(bargeContext){bargeContext.close().catch(()=>{});bargeContext=null;}
+ bargeBox.checked=false;
+}
+bargeBox.onchange=async()=>{
+ if(!bargeBox.checked){closeBarge();bargeStatus.textContent=say('Désactivée','Disabled');return;}
+ const rev=++bargeRevision;
+ if(!navigator.mediaDevices?.getUserMedia||!(window.AudioContext||window.webkitAudioContext)||!(window.SpeechRecognition||window.webkitSpeechRecognition)){
+  closeBarge();bargeStatus.textContent=say('Non pris en charge sur ce navigateur','Unsupported in this browser');return;
+ }
+ try{
+  const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
+  if(rev!==bargeRevision||!bargeBox.checked||state.currentView!=='studio'){stream.getTracks().forEach(t=>t.stop());return;}
+  bargeStream=stream;bargeContext=new (window.AudioContext||window.webkitAudioContext)();
+  const source=bargeContext.createMediaStreamSource(stream),analyser=bargeContext.createAnalyser();
+  analyser.fftSize=1024;source.connect(analyser);await bargeContext.resume();
+  if(rev!==bargeRevision)return;
+  const samples=new Float32Array(analyser.fftSize);
+  let consecutive=0,noise=.008,quietUntil=performance.now()+1200;
+  bargeStatus.textContent=say('Actif · casque recommandé','Active · headset recommended');
+  bargeTimer=setInterval(()=>{
+   analyser.getFloatTimeDomainData(samples);let sum=0;for(const x of samples)sum+=x*x;
+   const rms=Math.sqrt(sum/samples.length);
+   if(!ui.playing||!voiceAudio||voiceAudio.paused){consecutive=0;if(!ui.recognition)noise=.98*noise+.02*Math.min(.04,rms);return;}
+   if(ui.recognition||performance.now()<quietUntil){consecutive=0;return;}
+   consecutive=rms>Math.max(.045,noise*4)?consecutive+1:0;
+   if(consecutive>=5){
+    consecutive=0;quietUntil=performance.now()+2500;
+    // Stop narration immediately; the recognizer captures the next words.
+    by('studio-mic').click();
+    bargeStatus.textContent=say('Interruption détectée · continue à parler','Interruption detected · continue speaking');
+   }
+  },60);
+ }catch{closeBarge();bargeStatus.textContent=say('Micro non autorisé ou indisponible','Microphone permission denied or unavailable');}
+};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)closeBarge();});
+window.addEventListener('declic:view',e=>{if(e.detail!=='studio'){closeBarge();interrupt();if(ui.recognition){const r=ui.recognition;ui.recognition=null;r.abort();by('studio-mic').textContent='● Micro';}}});
+window.addEventListener('pagehide',closeBarge);
 document.querySelectorAll('[data-view],[data-goto]').forEach(b=>b.addEventListener('click',()=>{if((b.dataset.view||b.dataset.goto)!=='studio'){interrupt();if(ui.recognition){const r=ui.recognition;ui.recognition=null;r.abort();by('studio-mic').textContent='● Micro';}}}));
 window.addEventListener('pagehide',interrupt);draw();
 })();

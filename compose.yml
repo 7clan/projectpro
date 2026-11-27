@@ -1,0 +1,26 @@
+services:
+  declic:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      BAZAARLINK_API_KEY: ${BAZAARLINK_API_KEY:-}
+      DECLIC_DB_PATH: /var/lib/declic/declic.sqlite3
+      DECLIC_GEMINI_TEXT_FALLBACK: ${DECLIC_GEMINI_TEXT_FALLBACK:-1}
+      DECLIC_PIPER_DIR: /app/voices
+    volumes:
+      - declic-data:/var/lib/declic
+      - declic-voices:/app/voices
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+volumes:
+  declic-data:
+  declic-voices:

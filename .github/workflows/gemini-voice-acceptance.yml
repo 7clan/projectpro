@@ -8,7 +8,7 @@ permissions:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 17
     env:
       DECLIC_REQUIRE_GEMINI_VOICE: '1'
       GEMINI_API_KEY: ${{ secrets.GEMEINI }}
@@ -58,7 +58,7 @@ jobs:
           done
       - name: Safe provider diagnostics
         if: always()
-        run: grep -E 'Provider .*failed|Gemini discovery|OpenRouter discovered|Model .*finish|Gemini model .*finish' /tmp/studio.log || true
+        run: grep -E 'Cloud voice fallback|Provider .*failed|Gemini discovery|OpenRouter discovered|Model .*finish|Gemini model .*finish' /tmp/studio.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

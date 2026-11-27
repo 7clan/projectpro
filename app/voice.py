@@ -3,6 +3,7 @@ import asyncio
 import io
 import math
 import logging
+import time
 import re
 import shutil
 import struct
@@ -108,13 +109,24 @@ def _neural_render(text,lang,cues):
         w.writeframes(b"".join(frames))
     return out.getvalue(),marks
 
+_cloud_retry_at=0.0
+
+class CloudRateLimited(RuntimeError):
+    def __init__(self,seconds=60):
+        super().__init__("Cloud speech rate limited")
+        self.seconds=max(15,min(600,seconds))
+
 async def synthesize_preferred(text,lang,cues,cloud=False):
+    global _cloud_retry_at
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
-    if cloud:
+    if cloud and time.monotonic()>=_cloud_retry_at:
         try:
             audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),35)
             return audio,marks,'gemini-neural'
+        except CloudRateLimited as exc:
+            _cloud_retry_at=max(_cloud_retry_at,time.monotonic()+exc.seconds)
+            logging.getLogger(__name__).warning("Cloud voice rate limited; local voice used for %s seconds",exc.seconds)
         except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
             logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
     try:
@@ -150,6 +162,10 @@ async def _gemini_render(text,lang,cues):
             async with semaphore:
                 try:
                     r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}}})
+                    if r.status_code==429:
+                        try:delay=float(r.headers.get("Retry-After","60"))
+                        except ValueError:delay=60
+                        raise CloudRateLimited(delay if math.isfinite(delay) else 60)
                     r.raise_for_status()
                 except httpx.HTTPError as e:
                     raise RuntimeError("Cloud speech unavailable; status="+str(e.response.status_code if isinstance(e,httpx.HTTPStatusError) else type(e).__name__)) from e
@@ -167,13 +183,10 @@ async def _gemini_render(text,lang,cues):
             if rate and int(rate.group(1))!=24000: raise ValueError("Unexpected sample rate")
             if len(raw)<2400 or len(raw)%2: raise ValueError("Empty or malformed audio")
             return raw,positions
-        tasks=[asyncio.create_task(phrase(fragment,positions)) for fragment,positions in chunks]
-        try:
-            parts=await asyncio.gather(*tasks)
-        finally:
-            for task in tasks:
-                if not task.done(): task.cancel()
-            await asyncio.gather(*tasks,return_exceptions=True)
+        # Stop immediately at the first rejected phrase; do not spend further quota.
+        parts=[]
+        for fragment,positions in chunks:
+            parts.append(await phrase(fragment,positions))
     output=io.BytesIO()
     offset=0
     marks=[]

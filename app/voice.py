@@ -75,9 +75,127 @@ from functools import lru_cache
 _VOICE_LOCK=threading.Lock()
 _VOICE_NAMES={"fr":"fr_FR-siwis-medium","en":"en_US-lessac-medium"}
 _EXTRA_VOICES={"en_US-amy-medium":"en","en_US-ryan-medium":"en","en_GB-alba-medium":"en","fr_FR-tom-medium":"fr"}
-def voice_choices():
+_KOKORO_VOICES={"kokoro-michael":"am_michael","kokoro-michael-smooth":"am_michael"}
+_POCKET_VOICES={"pocket-alba":"alba","pocket-george":"george"}
+def _pocket_executable():
+    directory=Path(__file__).resolve().parents[1]/"voices"/"pocket"
+    candidate=directory/("pocket-tts.exe" if os.name=="nt" else "pocket-tts")
+    return str(candidate) if candidate.is_file() else None
+
+def _pocket_render(text,lang,cues,voice_name):
+    """Optional local standalone engine, no API credentials or custom references."""
+    import subprocess
+    import tempfile
+    import numpy as np
+    executable=_pocket_executable()
+    if not executable:raise FileNotFoundError("Pocket TTS executable not installed")
+    # One or two longer phrases retain prosody. Group boundaries are aligned
+    # to actual frames; coalesced reveal cues share the phrase start.
+    chunks=split_cues(text,cues)
+    while len(chunks)>1 and (len(chunks)>2 or any(len(x[0].split())<7 for x in chunks)):
+        i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
+        a,aa=chunks[i];b,bb=chunks[i+1]
+        chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
+    env={k:v for k,v in os.environ.items() if not any(x in k.upper() for x in ("KEY","TOKEN","SECRET","PASSWORD","GEMEINI","OPENROUTER","BAZAARLINK","SOME"))}
+    env.update({"RAYON_NUM_THREADS":"2","OMP_NUM_THREADS":"2","MKL_NUM_THREADS":"2","HF_HUB_DISABLE_TELEMETRY":"1"})
+    output=io.BytesIO();marks=[];offset=0;deadline=time.monotonic()+16
+    with _VOICE_LOCK,tempfile.TemporaryDirectory() as folder,wave.open(output,"wb") as w:
+        w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
+        for i,(fragment,positions) in enumerate(chunks):
+            path=Path(folder)/f"phrase-{i}.wav"
+            try:
+                subprocess.run([executable,"generate","--language","english_2026-04","--voice",_POCKET_VOICES[voice_name],"--text="+fragment,"--output-path",str(path),"--sampler-decode-steps","3"],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=max(.1,deadline-time.monotonic()),check=True)
+            except (subprocess.SubprocessError,OSError) as exc:
+                logging.getLogger(__name__).warning("Pocket synthesis failed: %s",type(exc).__name__)
+                raise FileNotFoundError("Pocket voice unavailable") from exc
+            with wave.open(str(path),"rb") as src:
+                if (src.getnchannels(),src.getsampwidth(),src.getframerate())!=(1,2,24000):raise ValueError("Unexpected Pocket audio format")
+                raw=src.readframes(src.getnframes())
+            samples=np.frombuffer(raw,dtype="<i2")
+            if len(samples)<2400 or not np.any(np.abs(samples.astype(np.int32))>100):raise ValueError("Empty Pocket audio")
+            marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
+            w.writeframes(raw);offset+=len(samples)
+    return output.getvalue(),marks
+
+def _kokoro_paths():
+    directory=Path(os.getenv("DECLIC_KOKORO_DIR",str(Path(__file__).resolve().parents[1]/"voices"/"kokoro")))
+    return directory/"kokoro-v1.0.onnx",directory/"voices-v1.0.bin"
+
+def _kokoro_available():
+    import importlib.util
+    return all(p.is_file() for p in _kokoro_paths()) and importlib.util.find_spec("kokoro_onnx") is not None
+
+@lru_cache(maxsize=1)
+def _kokoro_model(model_path,voices_path):
+    import onnxruntime as ort
+    from kokoro_onnx import Kokoro
+    # Bound CPU threads to avoid competing with the browser on a small laptop.
+    options=ort.SessionOptions()
+    options.intra_op_num_threads=2
+    options.inter_op_num_threads=1
+    session=ort.InferenceSession(model_path,sess_options=options,providers=["CPUExecutionProvider"])
+    return Kokoro.from_session(session,voices_path)
+
+def _soften_kokoro_pauses(samples,rate=24000):
+    """Reduce only sustained low-energy pauses; preserve samples and cue timing."""
+    import numpy as np
+    samples=np.asarray(samples,dtype=np.float32).reshape(-1)
+    # 20 ms RMS windows, requiring 160 ms of sustained quiet. Protect 40 ms
+    # beside speech; ramp attenuation instead of a hard gate or deleting samples.
+    block=rate//50
+    count=len(samples)//block
+    if count<8:return samples.copy()
+    frames=samples[:count*block].reshape(count,block)
+    rms=np.sqrt(np.mean(frames*frames,axis=1))
+    quiet=rms<10**(-48/20)
+    edges=np.flatnonzero(np.diff(np.r_[False,quiet,False]))
+    gain=np.ones(len(samples),dtype=np.float32)
+    for start,end in zip(edges[::2],edges[1::2]):
+        if end-start<8:continue
+        a=(start+2)*block
+        b=(end-2)*block
+        ramp=min(block*2,(b-a)//2)
+        if ramp<1:continue
+        floor=np.float32(10**(-18/20))
+        gain[a:a+ramp]=1-(1-floor)*(.5-.5*np.cos(np.linspace(0,np.pi,ramp)))
+        gain[a+ramp:b-ramp]=floor
+        gain[b-ramp:b]=floor+(1-floor)*(.5-.5*np.cos(np.linspace(0,np.pi,ramp)))
+    return samples*gain
+
+def _kokoro_render(text,lang,cues,voice_name):
+    import numpy as np
+    if not _kokoro_available():raise FileNotFoundError("Kokoro voice model not installed")
+    smooth=voice_name.endswith("-smooth")
+    chunks=split_cues(text,cues)
+    # Prefer sentence-sized narration in smooth mode when the cue plan has
+    # only one reveal. Keep multi-cue grouping/timing for animated examples.
+    # Keep longer phrases for prosody; all original cue keys remain represented.
+    while len(chunks)>1 and (len(chunks)>3 or any(len(x[0].split())<6 for x in chunks)):
+        i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
+        a,aa=chunks[i];b,bb=chunks[i+1]
+        chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
+    output=io.BytesIO();marks=[];offset=0
+    with _VOICE_LOCK:
+        model=_kokoro_model(*(str(p) for p in _kokoro_paths()))
+        with wave.open(output,"wb") as w:
+            w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
+            for fragment,positions in chunks:
+                samples,rate=model.create(fragment,voice=_KOKORO_VOICES[voice_name],speed=.94 if smooth else 1.0,lang="en-us")
+                samples=np.asarray(samples,dtype=np.float32).reshape(-1)
+                if rate!=24000 or samples.size<2400 or not np.isfinite(samples).all() or np.max(np.abs(samples))<.001:
+                    raise ValueError("Invalid Kokoro audio")
+                if smooth:samples=_soften_kokoro_pauses(samples,rate)
+                raw=(np.clip(samples,-1,1)*32767).astype("<i2").tobytes()
+                marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
+                w.writeframes(raw);offset+=samples.size
+    return output.getvalue(),marks
+
+def _piper_installed(voice_name):
     directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
-    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]
+    return (directory/(voice_name+".onnx")).is_file() and (directory/(voice_name+".onnx.json")).is_file()
+
+def voice_choices():
+    return [{"id":name,"lang":lang,"installed":_piper_installed(name)} for name,lang in _EXTRA_VOICES.items()]+[{"id":name,"lang":"en","installed":_kokoro_available()} for name in _KOKORO_VOICES]+[{"id":name,"lang":"en","installed":_pocket_executable() is not None} for name in _POCKET_VOICES]
 
 
 @lru_cache(maxsize=2)
@@ -127,30 +245,61 @@ async def synthesize_preferred(text,lang,cues,cloud=False,voice_name=None):
     cloud=cloud and os.getenv('DECLIC_LOCAL_ONLY')!='1'
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
+    if isinstance(voice_name,str) and voice_name in _POCKET_VOICES:
+        if lang!="en":raise ValueError("Unsupported voice for lesson language")
+        audio,marks=await asyncio.to_thread(_pocket_render,text,lang,cues,voice_name)
+        return audio,marks,voice_name
+    if isinstance(voice_name,str) and voice_name in _KOKORO_VOICES:
+        if lang!="en":raise ValueError("Unsupported voice for lesson language")
+        try:
+            audio,marks=await asyncio.to_thread(_kokoro_render,text,lang,cues,voice_name)
+        except (ImportError,OSError,RuntimeError) as exc:
+            raise FileNotFoundError("Kokoro voice unavailable") from exc
+        return audio,marks,voice_name
     if voice_name is not None:
         if not isinstance(voice_name,str) or _EXTRA_VOICES.get(voice_name)!=lang:
             raise ValueError("Unsupported voice for lesson language")
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues,voice_name)
         return audio,marks,"piper-"+voice_name
+    # Prefer the user's proven cloud engine, then Gemini. Reserve time for
+    # local synthesis within the API's 45-second response deadline.
+    if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
+        try:
+            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),10)
+            return audio,marks,"openrouter-heygen-neural"
+        except CloudRateLimited as exc:
+            _router_voice_retry_at=time.monotonic()+exc.seconds
+            logging.getLogger(__name__).warning("OpenRouter speech rate limited; trying next voice")
+        except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
+            _router_voice_retry_at=time.monotonic()+60
+            logging.getLogger(__name__).warning("OpenRouter speech fallback: %s",type(exc).__name__)
     if cloud and time.monotonic()>=_cloud_retry_at:
         try:
-            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),22)
+            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),10)
             return audio,marks,'gemini-neural'
         except CloudRateLimited as exc:
             _cloud_retry_at=max(_cloud_retry_at,time.monotonic()+exc.seconds)
             logging.getLogger(__name__).warning("Cloud voice rate limited; local voice used for %s seconds",exc.seconds)
         except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
             logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
-    if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
+    if lang=="en" and _pocket_executable():
         try:
-            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),14)
-            return audio,marks,"openrouter-heygen-neural"
-        except CloudRateLimited as exc:
-            _router_voice_retry_at=time.monotonic()+exc.seconds
-            logging.getLogger(__name__).warning("OpenRouter speech rate limited; local voice activated")
-        except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
-            _router_voice_retry_at=time.monotonic()+60
-            logging.getLogger(__name__).warning("OpenRouter speech fallback: %s",type(exc).__name__)
+            audio,marks=await asyncio.wait_for(asyncio.to_thread(_pocket_render,text,lang,cues,"pocket-george"),18)
+            return audio,marks,"pocket-george"
+        except (asyncio.TimeoutError,ImportError,OSError,RuntimeError,ValueError,wave.Error) as exc:
+            logging.getLogger(__name__).warning("George unavailable; trying installed fallback: %s",type(exc).__name__)
+    if lang=="fr" and _piper_installed("fr_FR-tom-medium"):
+        try:
+            audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues,"fr_FR-tom-medium")
+            return audio,marks,"piper-fr_FR-tom-medium"
+        except (ImportError,OSError,RuntimeError,ValueError,wave.Error) as exc:
+            logging.getLogger(__name__).warning("Tom unavailable; trying installed fallback: %s",type(exc).__name__)
+    if lang=="en" and _kokoro_available():
+        try:
+            audio,marks=await asyncio.wait_for(asyncio.to_thread(_kokoro_render,text,lang,cues,"kokoro-michael-smooth"),10)
+            return audio,marks,"kokoro-michael-smooth"
+        except (asyncio.TimeoutError,ImportError,OSError,RuntimeError,ValueError,wave.Error) as exc:
+            logging.getLogger(__name__).warning("Michael unavailable; trying Piper: %s",type(exc).__name__)
     try:
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
         return audio,marks,"piper-neural"

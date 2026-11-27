@@ -19,3 +19,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .step-tab.active{color:#5745ad}.companion-card p,.formula-card p,.micro-panel p{color:#53637a}.verified{color:#176b4e}
 .alert-item,.alert-item p{color:#53637a}.chat-status{color:#146e54}
 @media(prefers-reduced-motion:reduce){.view{animation:none}.nav-item,.primary-btn,.secondary-btn{transition:none}}
+
+/* Course tools */
+#view-quiz .panel,#view-classroom .panel{margin-bottom:16px}
+#view-quiz select,#view-classroom input:not([type=checkbox]),.course-question input{max-width:100%;min-width:0;padding:10px;border:1px solid #c5cfe0;border-radius:8px;font:inherit;color:#253955;background:#fff}
+#view-quiz label,#view-classroom label{display:block;margin:8px 0;color:#253955}
+#view-quiz button,#view-classroom button{margin:8px 8px 8px 0}
+.course-question{border-bottom:1px solid #dde3ef;padding:14px 0;overflow-wrap:anywhere}
+.course-question input,.course-question small{display:block;margin:8px 0}
+#class-code{overflow-wrap:anywhere}
+@media(max-width:530px){#view-quiz select,#view-classroom input:not([type=checkbox]),.course-question input{width:100%}}

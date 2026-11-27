@@ -465,3 +465,60 @@ def test_cloud_pythagoras_two_leg_wording_and_visual_regression(monkeypatch):
     for i,square in enumerate(polygons[:-1]):
         assert square[:2]==[triangle[i],triangle[(i+1)%3]]
     assert not any(o["kind"]=="circle" for o in final["objects"])
+
+
+@pytest.mark.parametrize("question,legs",[
+    ("Explain Pythagoras with perpendicular legs of 8 cm and 15 cm.",(8,15)),
+    ("Explique Pythagore avec les côtés perpendiculaires de 2,5 et 6 unités.",(2.5,6)),
+    ("Explain Pythagoras with sides 7, 24 and 25.",(7,24)),
+    ("Explain Pythagoras with legs measuring 6 and 8 units.",(6,8)),
+])
+def test_triangle_input_and_geometry_invariants(question,legs):
+    import math
+    from app.local_board import requested_diagram,compile_plan
+    a,b=legs
+    assert requested_diagram(question)==("triangle",{"a":a,"b":b})
+    scene={"title":"Triangle","speech":"Observe the triangle.","formula":"—","diagram":"triangle","a":a,"b":b,"label1":"a","label2":"b","label3":"c"}
+    steps,_=compile_plan(json.dumps({"scenes":[scene,scene]}),question,"en")
+    final=steps[-1]["objects"]
+    polygons=[o for o in final if o["kind"]=="polygon"]
+    assert [len(o["points"]) for o in polygons]==[4,4,4,3]
+    tri=polygons[-1]["points"]
+    def delta(u,v):return (v[0]-u[0],v[1]-u[1])
+    def cross(u,v):return u[0]*v[1]-u[1]*v[0]
+    def dot(u,v):return u[0]*v[0]+u[1]*v[1]
+    legs_px=[math.dist(tri[0],tri[i]) for i in (1,2)]
+    assert math.isclose(legs_px[0]/legs_px[1],a/b,rel_tol=1e-7)
+    assert abs(dot(delta(tri[0],tri[1]),delta(tri[0],tri[2])))<1e-6
+    for i,square in enumerate(polygons[:3]):
+        p,q,r,s=square["points"]
+        assert [p,q]==[tri[i],tri[(i+1)%3]]
+        vectors=[delta(u,v) for u,v in zip((p,q,r,s),(q,r,s,p))]
+        assert max(math.hypot(*v) for v in vectors)-min(math.hypot(*v) for v in vectors)<1e-6
+        assert abs(dot(vectors[0],vectors[1]))<1e-6
+        assert cross(delta(p,q),delta(p,r))*cross(delta(p,q),delta(p,tri[(i+2)%3]))<0
+    assert polygons[-1]["at"]<polygons[0]["at"]<polygons[2]["at"]<polygons[1]["at"]
+
+
+def test_ambiguous_triangle_input_not_silently_replaced(monkeypatch):
+    from app import whiteboard,providers
+    from app.local_board import triangle_dimensions
+    for q in ("Explain Pythagoras with sides 3, 4 and 6.","Explain Pythagoras with hypotenuse 13 and one leg 5."):
+        assert triangle_dimensions(q)==({},True)
+        async def forbidden(*args,**kwargs):raise AssertionError("must not invent an example")
+        monkeypatch.setattr(providers,"route",forbidden)
+        monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+        with providers.use_mode("cloud",True):
+            assert asyncio.run(whiteboard.generate(q,"en",[],[])) is None
+
+
+def test_force_doubling_is_not_ignored():
+    from app.local_board import compile_plan
+    question="Explain Newton's second law using a 4 kg object subjected to a force of 20 N. Animate the object accelerating and demonstrate what happens when the force doubles."
+    scene={"title":"Force","speech":"Observe the force.","formula":"—","diagram":"force","a":4,"b":20,"label1":"m","label2":"F","label3":"a"}
+    steps,checks=compile_plan(json.dumps({"scenes":[scene,scene]}),question,"en")
+    assert steps[0]["formula"]=="a = 20 / 4 = 5 m/s²"
+    assert steps[1]["formula"]=="a = 40 / 4 = 10 m/s²"
+    arrows=[next(o for o in step["objects"] if o["kind"]=="arrow") for step in steps]
+    assert arrows[1]["x2"]-arrows[1]["x"]==2*(arrows[0]["x2"]-arrows[0]["x"])
+    assert "doubles acceleration" in steps[1]["narration"]

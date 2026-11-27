@@ -73,7 +73,7 @@ A timed presenter script is in [`docs/DEMO_SCRIPT_FR.md`](docs/DEMO_SCRIPT_FR.md
 | Feature | Implementation | Important distinction |
 |---|---|---|
 | F01 authentication | Local registration/login, hashed passwords, bearer sessions, one-click isolated demo | Single-instance prototype; not a university SSO |
-| F02–F03 course PDFs | PDF upload, extraction, rendered in-app pages, source excerpts | Text PDFs supported; no OCR of scans |
+| F02–F03 course PDFs | PDF upload, extraction, rendered in-app pages, source excerpts | Native extraction plus bounded local Tesseract OCR; deferred pages can be retried |
 | F04 learning profile | Per-concept heuristics weighted toward independent transfer | Not a validated psychometric score |
 | F05 interactive beam | Load parameters, SVG beam, shear and moment diagrams | One simply supported beam model |
 | F06 recurring mistakes | Deterministic classifications; moment arms, omitted UDL, force balance | Heuristic, limited to this model |
@@ -85,7 +85,7 @@ A timed presenter script is in [`docs/DEMO_SCRIPT_FR.md`](docs/DEMO_SCRIPT_FR.md
 | F14 learning signals | Alert after repeated misconception | No predictive academic risk label |
 | F16–F20 PDF analytics | Pages viewed, foreground activity, active time | Timer is approximate, not attention tracking |
 
-Not implemented: institutional integrations, teacher dashboard, automated curriculum mapping across arbitrary subjects, verified social-media recommendations, secure production deployment, or measured improvements in educational outcomes. The term **“AI” describes the optional LLM coach and product direction**, not the deterministic parts.
+New course tools include opt-in teacher classrooms, source-exact recall quizzes, and local scanned-page OCR. Not implemented: institutional SSO, validated conceptual quiz generation across arbitrary subjects, verified social-media recommendations, public production deployment, or measured improvements in educational outcomes. The term **“AI” describes the optional LLM coach and product direction**, not the deterministic parts.
 
 ## Verify the code
 
@@ -134,3 +134,12 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for data flow, formulas, mode
 - [PhET, *Balancing Act*](https://phet.colorado.edu/en/simulations/balancing-act) — interactive torque and lever-arm intuition.
 
 DÉCLIC is an independently developed competition prototype, not endorsed by the institutions above.
+
+## Extended course tools and local deployment
+
+- **Quiz:** select one document or all indexed courses. The quiz blanks out an exact source word, grades recall, and links each correction to its page. It does not measure conceptual mastery.
+- **Classes:** create a classroom, share the one-time displayed join code, and view opted-in learner attempt/transfer counts from after enrolment. Students can revoke membership. No raw answers, PDFs, chats or email addresses are shared. Classroom ownership is self-service, not institutionally verified teacher identity.
+- **OCR:** install Tesseract with French and English language data (and add its executable to PATH). Upload automatically attempts up to 12 scan pages within a bounded time. Use OCR / Retry scan for an unindexed page; review OCR text before relying on it.
+- **Voice interruption:** click Interrupt or Micro to interrupt playback and cancel pending browser work. Optional speech auto-send submits recognized final text; recognition availability depends on the browser. This is turn-based conversation, not full-duplex streaming.
+- **Local AI:** optional Ollama on localhost. Set DECLIC_OLLAMA_MODEL to an installed model and DECLIC_LOCAL_ONLY=1 to avoid external LLM and speech calls. Model performance depends on hardware; browser speech recognition may still use a vendor service.
+- **Docker:** see [private pilot deployment instructions](docs/DEPLOYMENT.md). No public hosting is claimed.

@@ -8,9 +8,13 @@ permissions:
 jobs:
   classroom:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       TESTED_MAIN_SHA: 401c40e92199bb5b523cf518a53082cb3aeadd41
+      CLASSROOM_LIVE_AI: "1"
+      GEMINI_API_KEY: ${{ secrets.GEMEINI }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+      BAZAARLINK_API_KEY: ${{ secrets.SOME }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4

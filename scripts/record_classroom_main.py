@@ -97,6 +97,32 @@ with sync_playwright() as p:
         check("Student received six questions without answer key",len(quiz["questions"])==6 and all("answer" not in q and "excerpt" not in q for q in quiz["questions"]))
         check("Student cannot read teacher report",student.request.get(BASE+base+"/assignments/"+aid+"/report",headers=token(student)).status==404)
         shot(student,"05-student-opens-assignment")
+        # An actual individual tutoring interaction while enrolled in the class.
+        # Use the student's own browser and never provide the assignment answers.
+        if os.getenv("CLASSROOM_LIVE_AI")=="1":
+            student.locator('[data-view=studio]').click()
+            student.wait_for_function("state.aiEnabled===true")
+            if student.locator("#studio-ai-mode").input_value()!="cloud":
+                student.locator("#studio-ai-mode").select_option("cloud")
+            student.locator("#studio-consent").check()
+            student.locator("#studio-voice").uncheck()
+            student.locator("#studio-generative").check()
+            student.locator("#studio-question").fill("Teach me the concept of a lever arm using a simple animated diagram with a pivot and a force. Explain why moving a force farther from the pivot increases the moment. Use a different example from my assignment.")
+            with student.expect_response(lambda r:r.request.method=="POST" and r.url.endswith("/api/studio"),timeout=180000) as event:
+                student.locator("#studio-send").click()
+            lesson=event.value.json()
+            assert event.value.status==200
+            (OUT/"student-live-ai.json").write_text(json.dumps(lesson,ensure_ascii=False,indent=2))
+            check("Enrolled student received real individual AI tutoring",lesson.get("mode")=="live_ai" and bool(lesson.get("model")))
+            print("LIVE STUDENT AI",lesson.get("provider"),lesson.get("model"),lesson.get("visual_mode"),flush=True)
+            student.wait_for_function("document.querySelector('#studio-mode').textContent.includes('AI')")
+            student.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=120000)
+            shot(student,"05a-student-individual-ai-tutor")
+            student.locator('[data-view=classroom]').click()
+            expect(student.locator('#class-list')).to_contain_text("RDM2 - Mechanics demonstration")
+            student.locator('#class-list').get_by_role("button",name="Assignments",exact=True).click()
+            expect(student.locator('#assignment-panel')).to_contain_text("Statics practice - equilibrium")
+            quiz=response(student,"GET",base+"/assignments/"+aid,lambda:student.locator('#assignment-panel').get_by_role("button",name="Start",exact=True).click(),200)
         answers={}
         for i,q in enumerate(quiz["questions"]):
             correct=solve(q)

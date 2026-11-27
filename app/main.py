@@ -471,7 +471,7 @@ async def tutor(payload:CoachRequest,user=Depends(user_from_token)):
         return {'mode':'guided_offline','answer':'Termine ton essai indépendant avant de demander une aide liée à cet exercice.' if payload.lang=='fr' else 'Finish your independent attempt before requesting help with this exercise.','sources':[],'notice':'Évaluation indépendante' if payload.lang=='fr' else 'Independent assessment'}
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
-    if ai_status()["enabled"] and not payload.consent_external:
+    if ai_status()["enabled"] and not payload.consent_external and not local_generation_allowed():
         result=fallback_help(payload.question,b,payload.lang,sources)
         result["notice"] = "Aucune donnée envoyée à un fournisseur IA sans consentement explicite." if payload.lang=="fr" else "No data sent to an AI provider without explicit consent."
         return result
@@ -501,12 +501,12 @@ async def studio(payload:StudioRequest,request:Request,user=Depends(user_from_to
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
     history=[x.model_dump() for x in payload.history]
-    if payload.generative and payload.consent_external:
+    if payload.generative and (payload.consent_external or local_generation_allowed()):
         from .whiteboard import generate
         result=await until_disconnect(request,generate(payload.question,payload.lang,sources,history))
         if result is not None:
             return result
-    result=await until_disconnect(request,teach(payload.question,b,payload.lang,sources,history,payload.consent_external))
+    result=await until_disconnect(request,teach(payload.question,b,payload.lang,sources,history,payload.consent_external or local_generation_allowed()))
     result['visual_mode']='predefined'
     if payload.generative:
         result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'
@@ -573,6 +573,10 @@ def delete_account(user=Depends(user_from_token)):
         con.execute('DELETE FROM users WHERE id=?',(uid,))
     return {'deleted':True}
 
+
+def local_generation_allowed():
+    from .providers import local_only,local_model
+    return local_only() and bool(local_model())
 
 from .course_tools import install as install_course_tools
 install_course_tools(app,user_from_token)

@@ -74,3 +74,20 @@ def test_live_generation_uses_recovery_not_strict_rejection(monkeypatch):
         lesson=asyncio.run(whiteboard.generate("Explain pressure","en",[],[]))
     assert lesson["mode"]=="live_ai"
     assert "Calculation needs review" in lesson["quality_warnings"]
+
+
+def test_any_nonempty_unrecognized_response_is_preserved():
+    from app.lesson_recovery import recover_any_lesson
+    steps,checks,warnings=recover_any_lesson('{"unexpected":"An answer"}',"Pressure","en")
+    assert steps[0]["narration"]=='{"unexpected":"An answer"}'
+    assert not checks and warnings
+
+def test_semantic_invalid_plan_preserves_model_speech():
+    from app.lesson_recovery import recover_any_lesson
+    steps,checks,warnings=recover_any_lesson(json.dumps({"scenes":[{"title":"Explanation","speech":"The force is transmitted through the fluid."}]}),"Hydraulics","en",semantic=True)
+    assert steps[0]["narration"]=="The force is transmitted through the fluid."
+    assert warnings
+
+def test_any_empty_response_still_triggers_provider_fallback():
+    from app.lesson_recovery import recover_any_lesson
+    with pytest.raises(ValueError):recover_any_lesson("  ","Pressure","en")

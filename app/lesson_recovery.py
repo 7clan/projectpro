@@ -141,3 +141,82 @@ def recover_lesson(raw,question,lang):
     try:checks.extend(verify_subject_labels(steps,question))
     except (ValueError,KeyError,TypeError,OverflowError,ZeroDivisionError):warn("math")
     return steps,checks,warnings
+
+
+def recover_any_lesson(raw,question,lang,semantic=False):
+    """Always preserve a nonempty response, even if it cannot become a diagram.
+
+    The last-resort view is inert text, never executable model output. This
+    policy is specific to Studio; it does not bypass grading/authentication.
+    """
+    if not isinstance(raw,str) or not raw.strip():raise ValueError("Empty model response")
+    from .whiteboard import validate_board
+    fr=lang=="fr"
+    warning="Schéma indisponible · réponse IA conservée" if fr else "Diagram unavailable · AI response preserved"
+    if semantic:
+        from .local_board import compile_plan,requested_diagram
+        try:
+            start,end=raw.find("{"),raw.rfind("}")
+            data=json.loads(raw[start:end+1])
+            steps,checks=compile_plan(json.dumps(data),question,lang)
+            from .numerical_checks import verify_subject_labels
+            try:checks.extend(verify_subject_labels(steps,question))
+            except (ValueError,TypeError,KeyError,OverflowError):
+                return steps,checks,["Calcul à vérifier" if fr else "Calculation needs review"]
+            return steps,checks,[]
+        except (ValueError,TypeError,KeyError,IndexError,AttributeError,OverflowError,RecursionError):
+            # If the question explicitly supplies dimensions, bind the known
+            # physical parameters instead of rejecting a model's pixel values.
+            try:
+                kind,values=requested_diagram(question)
+                if not kind or not values:raise ValueError("No bound parameters")
+                data=json.loads(raw[raw.find("{"):raw.rfind("}")+1])
+                for scene in data["scenes"]:
+                    scene["diagram"]=kind
+                    scene.update(values)
+                steps,checks=compile_plan(json.dumps(data),question,lang)
+                return steps,checks,["Paramètres du problème rétablis" if fr else "Question parameters restored"]
+            except (ValueError,TypeError,KeyError,IndexError,AttributeError,OverflowError,RecursionError):
+                pass
+        # Preserve the model's narration even when semantic geometry is missing.
+        try:
+            data=from_json(raw[raw.find("{"):].encode(),allow_partial=True)
+            scenes=data.get("scenes",[])
+            converted=[]
+            for scene in scenes[:5]:
+                if isinstance(scene,dict) and isinstance(scene.get("speech"),str):
+                    converted.append({"title":scene.get("title"),"narration":scene["speech"],"formula":scene.get("formula","—"),"objects":[]})
+            if converted:
+                steps,checks,warnings=recover_lesson(json.dumps({"steps":converted}),question,lang)
+                return steps,checks,warnings
+        except (ValueError,TypeError,KeyError,IndexError,AttributeError,OverflowError,RecursionError):
+            pass
+    try:
+        return recover_lesson(raw,question,lang)
+    except (ValueError,TypeError,KeyError,IndexError,AttributeError,OverflowError,RecursionError):
+        # Try common explanation fields before displaying a literal response.
+        text=raw.strip()
+        try:
+            parsed=from_json(raw[raw.find("{"):].encode(),allow_partial=True)
+            if isinstance(parsed,dict):
+                for k in ("answer","explanation","narration","response","text"):
+                    if isinstance(parsed.get(k),str) and parsed[k].strip():
+                        text=parsed[k].strip()
+                        break
+        except (ValueError,TypeError,RecursionError):
+            pass
+        # The renderer/narrator is bounded. Preserve as much readable content
+        # as fits across five 450-character scenes and disclose truncation.
+        chunks=[]
+        remaining=text
+        while remaining and len(chunks)<5:
+            cut=min(440,len(remaining))
+            if len(remaining)>cut:
+                boundary=remaining.rfind(" ",0,cut)
+                if boundary>200:cut=boundary
+            chunks.append(remaining[:cut].strip())
+            remaining=remaining[cut:].strip()
+        steps=validate_board(json.dumps({"steps":[{"title":("Réponse IA" if fr else "AI response"),"formula":"—","narration":chunk,"objects":[{"kind":"text","x":300,"y":160,"size":20,"text":"Schéma indisponible" if fr else "Diagram unavailable"}]} for chunk in chunks if chunk]},ensure_ascii=False),min_steps=1)
+        warnings=[warning]
+        if remaining:warnings.append("Réponse tronquée" if fr else "Response truncated")
+        return steps,[],warnings

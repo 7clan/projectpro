@@ -111,9 +111,11 @@ async def generate_local(question,lang,sources,history):
         async with httpx.AsyncClient(timeout=local_timeout(),trust_env=False) as client:
             r=await client.post("http://127.0.0.1:11434/api/chat",json={"model":model,"stream":False,"format":schema_for(question),"messages":[{"role":"user","content":prompt}],"options":{"temperature":0,"num_ctx":4096,"num_predict":800}})
             r.raise_for_status()
-            steps,checks=compile_plan(r.json()["message"]["content"],question,lang)
-            from .numerical_checks import verify_subject_labels
-            checks.extend(verify_subject_labels(steps,question))
-        return {"mode":"live_ai","visual_mode":"generated","provider":"ollama","model":model,"steps":steps,"numerical_checks":checks,"sources":sources,"notice":"IA locale · schémas paramétriques · contenu à vérifier" if lang=="fr" else "Local AI · parametric diagrams · verify content"}
+            from .lesson_recovery import recover_any_lesson
+            steps,checks,warnings=recover_any_lesson(r.json()["message"]["content"],question,lang,semantic=True)
+        notice="IA locale · contenu à vérifier" if lang=="fr" else "Local AI · verify content"
+        if warnings:notice+=" · "+" / ".join(warnings)
+        graphical=any(o["kind"]!="text" for step in steps for o in step["objects"])
+        return {"mode":"live_ai","visual_mode":"generated" if graphical else "text_only","provider":"ollama","model":model,"steps":steps,"numerical_checks":checks,"quality_warnings":warnings,"sources":sources,"notice":notice}
     except (httpx.HTTPError,ValueError,TypeError,KeyError,IndexError):
         return None

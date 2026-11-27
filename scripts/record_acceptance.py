@@ -1,3 +1,4 @@
+from browser_wait import wait_for
 """Real Chromium recording, never injects a lesson or substitutes mocked audio."""
 import json, os, pathlib, subprocess, time, urllib.request, re
 from playwright.sync_api import sync_playwright
@@ -27,7 +28,7 @@ with sync_playwright() as p:
         try:
             page.goto("http://127.0.0.1:8000")
             page.locator("#demo-login").click()
-            page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter') || document.querySelector('#ai-mode').textContent.includes('bazaarlink') || document.querySelector('#ai-mode').textContent.includes('ollama')")
+            wait_for(page,"document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter') || document.querySelector('#ai-mode').textContent.includes('bazaarlink') || document.querySelector('#ai-mode').textContent.includes('ollama')")
             page.locator('[data-view="studio"]').click()
             if os.getenv("DECLIC_LOCAL_ONLY")!="1":page.locator("#studio-consent").check()
             else:page.locator("#studio-consent").uncheck()
@@ -71,12 +72,12 @@ with sync_playwright() as p:
             rec=subprocess.Popen(["ffmpeg","-hide_banner","-loglevel","error","-y","-thread_queue_size","512","-f","x11grab","-framerate","20","-video_size","1440x900","-i",os.environ["DISPLAY"],"-thread_queue_size","512","-f","pulse","-i","declic.monitor","-c:v","libx264","-preset","ultrafast","-crf","25","-pix_fmt","yuv420p","-c:a","aac","-movflags","+faststart",str(out/(label+".mp4"))],stdin=subprocess.PIPE)
             time.sleep(1)
             page.locator("#studio-play").click()
-            page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
+            wait_for(page,"document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
             assert int(page.locator("#studio-svg").get_attribute("data-cue-count") or 0)>0
             result["voice_backend"]=page.locator("#studio-svg").get_attribute("data-voice-backend")
             if os.getenv("DECLIC_REQUIRE_NEURAL")=="1": assert result["voice_backend"]=="piper-neural",result["voice_backend"]
             if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1": assert result["voice_backend"]=="gemini-neural",result["voice_backend"]
-            page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
+            wait_for(page,"document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
             if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1":assert page.locator("#studio-svg").get_attribute("data-voice-backend")=="gemini-neural","Final scene did not use cloud voice"
             assert page.locator("#studio-svg").get_attribute("data-audio")=="ended"
             trace=page.evaluate("window.studioTrace")

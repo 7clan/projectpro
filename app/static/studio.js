@@ -11,7 +11,7 @@ function line(x1,y1,x2,y2,color='#73819b',width=2,dash=''){return shape('line',{
 function text(x,y,content,color='#24314b',size=15){return shape('text',{x,y,fill:color,'font-size':size,'font-weight':600,'text-anchor':'middle'},content);}
 function arrow(x,y1,y2,color,label){line(x,y1,x,y2,color,3);const d=y2>y1?1:-1;shape('path',{d:'M '+(x-6)+' '+(y2-d*9)+' L '+x+' '+y2+' L '+(x+6)+' '+(y2-d*9),fill:'none',stroke:color,'stroke-width':3});if(label)text(x,y1+(d===1?-9:19),label,color,13);}
 function draw(scene='load'){
- svg.replaceChildren();const left=70,right=530,y=184,mid=300,p=185;
+ svg.replaceChildren();if(scene==='unavailable'){text(300,135,say('Leçon générative indisponible','Generated lesson unavailable'),'#24314b',21);text(300,175,say('Réessaie ou utilise le guide RDM2','Retry or use the RDM2 guide'),'#687995',15);return;}const left=70,right=530,y=184,mid=300,p=185;
  text(300,28,say('EXEMPLE ILLUSTRATIF · RDM2','ILLUSTRATIVE EXAMPLE · RDM2'),'#687995',12);
  line(left,y,right,y,'#253955',10);
  for(const x of [left,right]){shape('path',{d:'M '+x+' '+(y+7)+' l -17 25 h 34 z',fill:'#d2daeb',stroke:'#71829e'});line(x-22,y+35,x+22,y+35);}

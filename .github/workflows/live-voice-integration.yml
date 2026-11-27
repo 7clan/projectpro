@@ -1,0 +1,46 @@
+name: Live AI and bilingual voice integration proof
+on:
+  push:
+    branches: ['test/live-ai-voice-integration']
+    paths: ['.github/workflows/live-voice-integration.yml', 'scripts/live_voice_integration.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt playwright
+      - run: python scripts/install_voice_fallbacks.py
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth
+      - name: Record real live cloud inference and local narration
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMEINI || secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER || secrets.OPENROUTER_API_KEY }}
+          BAZAARLINK_API_KEY: ${{ secrets.SOME || secrets.BAZAARLINK_API_KEY }}
+          DECLIC_LOCAL_ONLY: '0'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          mkdir -p live-voice-evidence
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/live-voice-server.log 2>&1 &
+          for i in $(seq 1 60); do curl --silent --fail http://127.0.0.1:8000/api/health && break; sleep .5; done
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
+          xvfb-run -a -s "-screen 0 1440x900x24" python scripts/live_voice_integration.py
+      - name: Safe provider diagnostics
+        if: always()
+        run: |
+          mkdir -p live-voice-evidence
+          grep -E 'Provider .*failed|routing deadline|AI route success|Cloud voice|OpenRouter speech' /tmp/live-voice-server.log >live-voice-evidence/provider-diagnostics.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-live-AI-bilingual-audible-proof
+          path: live-voice-evidence/

@@ -391,7 +391,7 @@ def retry_page_ocr(document_id:str,page:int,user=Depends(user_from_token)):
     d=owned_doc(document_id,user['id'])
     if not 0<=page<d['page_count']:raise HTTPException(404,'Page introuvable')
     existing=one('SELECT content FROM document_pages WHERE document_id=? AND page=?',(document_id,page))
-    if existing and existing['content'].strip():
+    if existing and existing['content'].strip() and not one("SELECT 1 FROM page_extraction WHERE document_id=? AND page=? AND method IN ('ocr_deferred','ocr_unavailable','ocr_failed','empty')",(document_id,page)):
         raise HTTPException(409,'Cette page contient déjà du texte indexé')
     source=one('SELECT data FROM documents WHERE id=? AND user_id=?',(document_id,user['id']))
     if not source:raise HTTPException(404,'Document introuvable')

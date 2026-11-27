@@ -119,6 +119,7 @@ class CloudRateLimited(RuntimeError):
 
 async def synthesize_preferred(text,lang,cues,cloud=False):
     global _cloud_retry_at,_router_voice_retry_at
+    cloud=cloud and os.getenv('DECLIC_LOCAL_ONLY')!='1'
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
     if cloud and time.monotonic()>=_cloud_retry_at:

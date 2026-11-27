@@ -13,7 +13,7 @@ async function materials(){
 id('quiz-start').onclick=async()=>{
  if(busy)return;busy=true;id('quiz-start').disabled=true;
  try{
-  quiz=await api('/api/quizzes',{method:'POST',body:JSON.stringify({document_id:id('quiz-document').value||null,count:Number(id('quiz-count').value),kind:id('quiz-kind').value,difficulty:id('quiz-difficulty').value,lang:state.language})});
+  quiz=await api('/api/quizzes',{method:'POST',body:JSON.stringify({document_id:id('quiz-document').value||null,count:Number(id('quiz-count').value),kind:id('quiz-kind').value,difficulty:id('quiz-difficulty').value,lang:state.language,ai_mode:state.aiMode||'hybrid',consent_external:id('quiz-consent').checked})});
   id('quiz-results').replaceChildren();id('quiz-questions').replaceChildren();
   for(const [i,q] of quiz.questions.entries()){
    const wrap=el('div','course-question');const label=el('label',null,(i+1)+'. '+q.prompt);label.htmlFor='q-'+q.id;
@@ -21,7 +21,7 @@ id('quiz-start').onclick=async()=>{
    wrap.append(label,el('small','muted',q.title+(q.page!==null?' · p. '+(q.page+1):' · '+(q.difficulty||''))),input);id('quiz-questions').append(wrap);
   }
   id('quiz-form').hidden=false;id('quiz-form').querySelector('button').disabled=false;
-  status('quiz-status',quiz.questions.length+' / '+quiz.eligible_pages+' '+t('questions / pages lisibles','questions / readable pages'));
+  status('quiz-status',quiz.questions.length+' '+t('questions','questions')+(quiz.metadata?.provider?' · '+quiz.metadata.provider+' · '+(quiz.metadata.review==='independent_pass'?t('Relecture IA sans erreur signalée (non preuve)','Independent AI review found no issue (not proof)'):t('Relecture indépendante indisponible — vérifier','Independent review unavailable — verify')):'')+' · '+quiz.note);
  }catch(e){showError(e)}finally{busy=false;id('quiz-start').disabled=false}
 };
 id('quiz-form').onsubmit=async e=>{
@@ -30,7 +30,7 @@ id('quiz-form').onsubmit=async e=>{
   const answers=Object.fromEntries(quiz.questions.map(q=>[q.id,id('q-'+q.id).value]));
   const r=await api('/api/quizzes/'+quiz.id+'/submit',{method:'POST',body:JSON.stringify({answers})});
   const target=id('quiz-results');target.replaceChildren(el('h3',null,r.correct+' / '+r.total));
-  for(const q of r.results){const row=el('div','course-question');row.append(el('strong',null,(q.correct?'✓ ':'✕ ')+q.answer),el('p',null,q.excerpt),button(q.title+' · p. '+(q.page+1),()=>openCourseSource(q)));target.append(row)}
+  for(const q of r.results){const row=el('div','course-question');row.append(el('strong',null,(q.correct?'✓ ':'✕ ')+q.answer),el('p',null,q.excerpt));if(q.document_id)row.append(button(q.title+' · p. '+(q.page+1),()=>openCourseSource(q)));target.append(row)}
   id('quiz-form').hidden=true;quiz=null;
  }catch(e){showError(e);submit.disabled=false}finally{busy=false}
 };

@@ -12,7 +12,7 @@ def requested_diagram(question):
     q=question.casefold()
     if "pythagor" in q:
         # Explicit 3, 4, 5 style triples only, not arbitrary numbers elsewhere.
-        match=re.search(r"(?:rectangle|triangle|sides|côtés)\s+(?:de\s+côtés\s+)?(\d+(?:\.\d+)?)\s*[,;]\s*(\d+(?:\.\d+)?)\s*[,;]\s*(\d+(?:\.\d+)?)",q)
+        match=re.search(r"(?:rectangle|triangle|sides|côtés)\s+(?:de\s+côtés\s+)?(\d+(?:\.\d+)?)\s*[,;]\s*(\d+(?:\.\d+)?)\s*(?:[,;]\s*(?:(?:and|et)\s+)?|(?:and|et)\s+)(\d+(?:\.\d+)?)\b",q)
         if match:
             x,y,z=map(float,match.groups())
             if abs(x*x+y*y-z*z)<.0001:return "triangle",{"a":x,"b":y}
@@ -38,13 +38,14 @@ def schema_for(question):
 def compile_plan(raw,question="",lang="fr"):
 
     data=json.loads(raw)
-    if not isinstance(data,dict) or len(data.get("scenes",[]))!=2:raise ValueError("Expected two scenes")
+    if not isinstance(data,dict) or not isinstance(data.get("scenes"),list) or len(data["scenes"])!=2:raise ValueError("Expected two scenes")
     steps=[];checks=[]
     def obj(kind,at=0,**kw):return {"kind":kind,"at":at,"color":"ink","motion":"fade",**kw}
     def label(x,y,text,at=0):return obj("text",at,x=x,y=y,size=16,text=text)
     expected,values=requested_diagram(question)
     first_parameters=None
     for index,scene in enumerate(data["scenes"]):
+        if not isinstance(scene,dict):raise ValueError("Invalid scene")
         if expected and scene["diagram"]!=expected:raise ValueError("Diagram does not match the requested subject")
         if any(abs(scene[k]-v)>1e-6 for k,v in values.items()):raise ValueError("Diagram parameters do not match the question")
         a,b=scene["a"],scene["b"]

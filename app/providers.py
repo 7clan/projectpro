@@ -24,7 +24,17 @@ def _limit(provider,model,response):
     try:delay=float(response.headers.get("Retry-After","60"))
     except ValueError:delay=60
     if not math.isfinite(delay):delay=60
-    scope="*" if status in (401,403) or (provider=="bazaarlink" and status==429) else model
+    # A provider's exhausted free model pool is not the account's RPM limit.
+    model_quota=False
+    if provider=="bazaarlink" and status==429:
+        try:
+            body=response.json()
+            error=body.get("error",{})
+            if isinstance(error,dict):
+                model_quota=error.get("code")=="free_quota_exhausted" or error.get("type")=="free_quota_exhausted" or error.get("reason")=="free_quota_exhausted"
+            model_quota=model_quota or body.get("code")=="free_quota_exhausted" or body.get("reason")=="free_quota_exhausted"
+        except (ValueError,AttributeError,TypeError):pass
+    scope="*" if status in (401,403) or (provider=="bazaarlink" and status==429 and not model_quota) else model
     # A 402 can reflect the requested token budget for an individual model.
     # Do not disable every model for that response.
     seconds=300 if status in (401,403) else max(15,min(600,delay))
@@ -68,6 +78,15 @@ def local_timeout():
     try:return max(30,min(300,int(os.getenv("DECLIC_OLLAMA_TIMEOUT","180"))))
     except ValueError:return 180
 
+def gemini_rank(name):
+    # Prefer discovered low-use models from the pilot account, then Flash Lite.
+    n=name.casefold().removeprefix("models/")
+    return ("3.6-flash" in n, "3.5-flash-lite" in n, "lite" in n, "latest" not in n, "preview" not in n)
+
+def router_rank(name):
+    n=name.casefold()
+    return (n=="google/gemma-4-31b-it:free",any(s in n for s in ("gemma","mistral","qwen","llama")),not any(s in n for s in ("thinking","reason","r1")),"instruct" in n)
+
 async def candidates(client):
     result=[]
     local=local_model()
@@ -83,7 +102,7 @@ async def candidates(client):
             r=await client.get("https://generativelanguage.googleapis.com/v1beta/models",headers={"x-goog-api-key":key},params={"pageSize":100})
             r.raise_for_status()
             names=[m["name"].removeprefix("models/") for m in r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[]) and "flash" in m["name"] and not any(x in m["name"] for x in ("image","audio","tts","live","thinking"))]
-            names.sort(key=lambda n:(("latest" in n),("2.5" not in n),("lite" not in n),("preview" not in n)),reverse=True)
+            names.sort(key=gemini_rank,reverse=True)
             log.info("Gemini discovered %d eligible models",len(names))
             for n in names[:4]: result.append(("gemini",n,key))
         except (httpx.HTTPError,KeyError,ValueError) as e:
@@ -96,9 +115,7 @@ async def candidates(client):
             r.raise_for_status()
             free=[m["id"] for m in r.json().get("data",[]) if m["id"].endswith(":free") and "text" in m.get("architecture",{}).get("output_modalities",["text"])]
             # Prefer instruct-oriented models, then other currently listed free models.
-            def rank(n):
-                return (any(s in n.lower() for s in ("gemma","mistral","qwen","llama")),not any(s in n.lower() for s in ("thinking","reason","r1")), "instruct" in n.lower())
-            free.sort(key=rank,reverse=True)
+            free.sort(key=router_rank,reverse=True)
             log.info("OpenRouter discovered %d free models",len(free))
         except (httpx.HTTPError,KeyError,ValueError):
             free=[]
@@ -156,10 +173,8 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
         if reserve and (role=="review" or os.getenv("DECLIC_GEMINI_TEXT_FALLBACK","1")=="0"):
             gemini=[]
         # Different accounts share no local cooldown. Avoid redundant parallel calls.
-        # Prefer BazaarLink for original visual lessons, OpenRouter for short coaching.
-        if role=="review":
-            bazaar=sorted(bazaar,key=lambda o:"deepseek" not in o[1])
-        first,second=(bazaar,router) if role in ("lesson","review") else (router,bazaar)
+        # Pilot: Gemma and Qwen completed real requests; DeepSeek's free pool did not.
+        first,second=(router,bazaar)
         options=[]
         if first:options.append(first[0])
         if second:options.append(second[0])
@@ -173,7 +188,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
             try:
                 raw=await complete(client,provider,model,key,prompt,budget)
                 value=validator(raw)
-                log.info("AI route success role=%s provider=%s model=%s",role,provider,model)
+                log.warning("AI route success role=%s provider=%s model=%s",role,provider,model)
                 return value,provider,model
             except (httpx.HTTPError,ValueError,KeyError,TypeError,IndexError,AttributeError) as e:
                 status=e.response.status_code if isinstance(e,httpx.HTTPStatusError) else None

@@ -242,3 +242,70 @@ def test_local_diagram_must_match_question():
     assert "3 mètres" in steps[1]["narration"]
     scene["a"]=4
     with pytest.raises(ValueError):compile_plan(json.dumps({"scenes":[scene,scene]}),q)
+
+
+def test_mode_selection_isolated_and_consent_safe(monkeypatch):
+    from app.providers import use_mode,mode,candidates,configured_modes
+    monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+    monkeypatch.setenv("DECLIC_OLLAMA_MODEL","local-model")
+    monkeypatch.setenv("BAZAARLINK_API_KEY","test-key")
+    assert configured_modes()=={"cloud":True,"local":True,"hybrid":True}
+    async def worker(selected,consent,expected):
+        with use_mode(selected,consent):
+            await asyncio.sleep(.01)
+            assert mode()==expected
+            if expected=="local":
+                assert await candidates(None)==[("ollama","local-model","")]
+            elif expected=="disabled":
+                assert await candidates(None)==[]
+    async def run():
+        await asyncio.gather(worker("local",True,"local"),worker("cloud",False,"disabled"),worker("hybrid",False,"local"))
+    asyncio.run(run())
+    assert mode()=="hybrid"
+    with use_mode("cloud",True):
+        assert mode()=="cloud"
+    monkeypatch.setenv("DECLIC_LOCAL_ONLY","1")
+    with use_mode("cloud",True):
+        assert mode()=="local"
+
+def test_course_ai_grounding_and_privacy(client,auth,monkeypatch):
+    from app import course_ai
+    from app.providers import mode
+    from app.storage import one
+    text="Mitochondria produce ATP through oxidative phosphorylation. This process supplies energy to many cells."
+    d=upload(client,auth,[text])
+    # A response without explicit cloud consent must never invoke the generator.
+    monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+    monkeypatch.setenv("DECLIC_OLLAMA_MODEL","local-test")
+    calls=[]
+    async def fake(pages,count,difficulty,lang):
+        calls.append(mode())
+        raw=json.dumps({"questions":[{"prompt":"Which process produces ATP in mitochondria?","options":["oxidative phosphorylation","osmosis","diffusion","transcription"],"answer":"oxidative phosphorylation","source":"1","evidence":"Mitochondria produce ATP through oxidative phosphorylation."}]})
+        return course_ai.validate_questions(raw,course_ai.excerpts(pages),count),{"provider":"ollama","review":"unavailable"}
+    monkeypatch.setattr(course_ai,"generate",fake)
+    body={"kind":"course_ai","document_id":d["id"],"count":1,"lang":"en","ai_mode":"cloud"}
+    assert client.post("/api/quizzes",headers=auth,json=body).status_code==403
+    assert calls==[]
+    body["ai_mode"]="local"
+    r=client.post("/api/quizzes",headers=auth,json=body)
+    assert r.status_code==201,r.text
+    assert calls==["local"]
+    q=r.json()["questions"][0]
+    assert "answer" not in q and "excerpt" not in q and len(q["options"])==4
+    url="/api/quizzes/"+r.json()["id"]+"/submit"
+    assert client.post(url,headers=auth,json={"answers":{q["id"]:"invented answer"}}).status_code==422
+    result=client.post(url,headers=auth,json={"answers":{q["id"]:"oxidative phosphorylation"}}).json()
+    assert result["correct"]==1
+    assert result["results"][0]["excerpt"] in text
+
+def test_ai_quiz_rejects_fabricated_evidence_and_duplicate_choices():
+    from app.course_ai import validate_questions,excerpts
+    sources=excerpts([{"document_id":"test","title":"Biology","page":0,"content":"Mitochondria produce ATP through oxidative phosphorylation. This process supplies energy to many cells."}])
+    question={"prompt":"Which process produces ATP in mitochondria?","options":["oxidative phosphorylation","osmosis","diffusion","transcription"],"answer":"oxidative phosphorylation","source":"1","evidence":"Mitochondria produce ATP through oxidative phosphorylation."}
+    def raw():return json.dumps({"questions":[question]})
+    assert len(validate_questions(raw(),sources,1))==1
+    question["evidence"]="Mitochondria use oxidative phosphorylation to produce glucose."
+    with pytest.raises(ValueError):validate_questions(raw(),sources,1)
+    question["evidence"]="Mitochondria produce ATP through oxidative phosphorylation."
+    question["options"][1]=question["options"][0]
+    with pytest.raises(ValueError):validate_questions(raw(),sources,1)

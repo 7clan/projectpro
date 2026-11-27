@@ -71,7 +71,7 @@ async def teach(question, beam, lang, sources, history, consent):
     try:
         async with httpx.AsyncClient(timeout=28) as client:
             if cfg["provider"]=="openrouter":
-                r=await client.post("https://openrouter.ai/api/v1/chat/completions",headers={"Authorization":"Bearer "+os.environ["OPENROUTER_API_KEY"],"X-Title":"Declic live studio"},json={"model":cfg["model"],"messages":[{"role":"user","content":prompt}],"temperature":0.3,"max_tokens":3500,"response_format":{"type":"json_object"}})
+                r=await client.post("https://openrouter.ai/api/v1/chat/completions",headers={"Authorization":"Bearer "+os.environ["OPENROUTER_API_KEY"],"X-Title":"Declic live studio"},json={"model":cfg["model"],"messages":[{"role":"user","content":prompt}],"temperature":0.3,"max_tokens":3500})
                 r.raise_for_status()
                 raw=r.json()["choices"][0]["message"]["content"]
             else:
@@ -82,6 +82,6 @@ async def teach(question, beam, lang, sources, history, consent):
         lesson["mode"]="live_ai"
         lesson["notice"]="Narration IA · schémas et formules prédéfinis" if lang=="fr" else "AI narration · predefined diagrams and formulas"
     except (httpx.HTTPError,ValueError,KeyError,TypeError,IndexError,AttributeError) as exc:
-        logging.getLogger(__name__).warning("Studio provider or parser failure: %s", type(exc).__name__)
+        logging.getLogger(__name__).warning("Studio provider or parser failure: %s status=%s", type(exc).__name__,exc.response.status_code if isinstance(exc,httpx.HTTPStatusError) else None)
         lesson["notice"]="IA indisponible · guide local" if lang=="fr" else "AI unavailable · local guide"
     return lesson

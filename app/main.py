@@ -404,3 +404,23 @@ async def tutor(payload:CoachRequest,user=Depends(user_from_token)):
         result["notice"] = "Aucune donnée envoyée à un fournisseur IA sans consentement explicite." if payload.lang=="fr" else "No data sent to an AI provider without explicit consent."
         return result
     return await coach(payload.question,b,payload.lang,sources,reveal=attempted)
+
+
+class StudioTurn(BaseModel):
+    role: str = Field(pattern='^(student|tutor)$')
+    text: str = Field(min_length=1,max_length=1600)
+
+class StudioRequest(BaseModel):
+    question: str = Field(min_length=3,max_length=800)
+    challenge_id: str | None = None
+    lang: str = Field(default='fr',pattern='^(fr|en)$')
+    consent_external: bool = False
+    history: list[StudioTurn] = Field(default_factory=list,max_length=8)
+
+@app.post('/api/studio')
+async def studio(payload:StudioRequest,user=Depends(user_from_token)):
+    from .studio import teach
+    b=beam_for(owned_challenge(payload.challenge_id,user['id'])) if payload.challenge_id else Beam()
+    pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
+    sources=search_sources(pages,payload.question)
+    return await teach(payload.question,b,payload.lang,sources,[x.model_dump() for x in payload.history],payload.consent_external)

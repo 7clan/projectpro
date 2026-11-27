@@ -47,6 +47,19 @@ CREATE TABLE IF NOT EXISTS page_extraction (
  document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
  page INTEGER NOT NULL, method TEXT NOT NULL, PRIMARY KEY(document_id,page)
 );
+CREATE TABLE IF NOT EXISTS quizzes (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ questions TEXT NOT NULL, results TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS classrooms (
+ id TEXT PRIMARY KEY, teacher_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ name TEXT NOT NULL, code_hash TEXT UNIQUE NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS classroom_members (
+ classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ joined_at TEXT NOT NULL, PRIMARY KEY(classroom_id,user_id)
+);
 CREATE INDEX IF NOT EXISTS idx_attempt_user ON attempts(user_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_read_user ON reading_events(user_id,created_at);
 """

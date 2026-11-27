@@ -1,0 +1,35 @@
+name: Voice profiles audible acceptance
+on:
+  push:
+    branches: ['feature/voice-expansion']
+    paths: ['.github/workflows/voice-profiles.yml', 'scripts/voice_profiles_acceptance.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt -r requirements-voice.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth
+      - run: mkdir -p voices && python -m piper.download_voices --data-dir voices en_US-amy-medium en_US-ryan-medium en_GB-alba-medium fr_FR-tom-medium fr_FR-siwis-medium en_US-lessac-medium
+      - run: python -m pytest -q && node --check app/static/studio.js
+      - name: Record real browser and voice playback
+        run: |
+          mkdir -p voice-expansion-evidence
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >voice-expansion-evidence/server.log 2>&1 &
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
+          xvfb-run -a -s "-screen 0 1440x900x24" python scripts/voice_profiles_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-new-voices-audible-recordings
+          path: voice-expansion-evidence/

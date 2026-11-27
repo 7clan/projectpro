@@ -309,3 +309,31 @@ def test_ai_quiz_rejects_fabricated_evidence_and_duplicate_choices():
     question["evidence"]="Mitochondria produce ATP through oxidative phosphorylation."
     question["options"][1]=question["options"][0]
     with pytest.raises(ValueError):validate_questions(raw(),sources,1)
+
+
+def test_streaming_speech_auth_and_pcm_bounds(client,auth,monkeypatch):
+    from app import speech_stream as speech
+    from starlette.websockets import WebSocketDisconnect
+    monkeypatch.setattr(speech,"available",lambda lang:True)
+    monkeypatch.setattr(speech,"recognizer",lambda lang:object())
+    monkeypatch.setattr(speech,"accept",lambda rec,data:{"type":"partial","text":"bonjour"})
+    monkeypatch.setattr(speech,"finish",lambda rec:{"type":"final","text":"bonjour le monde"})
+    url="/api/studio/listen";headers={"origin":"http://testserver"}
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(url,headers={"origin":"https://untrusted.invalid"}):pass
+    with client.websocket_connect(url,headers=headers) as ws:
+        ws.send_json({"token":"invalid","lang":"fr"})
+        with pytest.raises(WebSocketDisconnect):ws.receive_json()
+    token=auth["Authorization"].removeprefix("Bearer ")
+    with client.websocket_connect(url,headers=headers) as ws:
+        ws.send_json({"token":token,"lang":"fr"})
+        assert ws.receive_json()["backend"]=="vosk-local"
+        ws.send_bytes(b"\x00\x00"*3200)
+        assert ws.receive_json()=={"type":"partial","text":"bonjour"}
+        ws.send_text("end")
+        assert ws.receive_json()=={"type":"final","text":"bonjour le monde"}
+    with client.websocket_connect(url,headers=headers) as ws:
+        ws.send_json({"token":token,"lang":"fr"})
+        assert ws.receive_json()["type"]=="ready"
+        ws.send_bytes(b"\x00")
+        with pytest.raises(WebSocketDisconnect):ws.receive_json()

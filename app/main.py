@@ -435,3 +435,37 @@ async def studio(payload:StudioRequest,user=Depends(user_from_token)):
     if payload.generative:
         result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'
     return result
+
+
+@app.post('/api/studio/audio')
+async def studio_audio(payload: dict, user=Depends(user_from_token)):
+    import asyncio
+    import shutil
+    text=payload.get('text')
+    lang=payload.get('lang','fr')
+    if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en'):
+        raise HTTPException(422,'Invalid narration')
+    executable=shutil.which('espeak-ng') or shutil.which('espeak')
+    if not executable:
+        raise HTTPException(503,'Local voice unavailable')
+    proc=await asyncio.create_subprocess_exec(executable,'--stdout','-v',lang,'-s','155','--stdin',stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
+    try:
+        audio,_=await asyncio.wait_for(proc.communicate(text.encode('utf-8')),10)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HTTPException(503,'Voice timed out')
+    if proc.returncode or not audio.startswith(b'RIFF'):
+        raise HTTPException(503,'Voice unavailable')
+    # espeak streams an indefinite length WAV header. Repair lengths for browser seeking.
+    import struct
+    wav=bytearray(audio)
+    struct.pack_into('<I',wav,4,len(wav)-8)
+    off=12
+    while off+8<=len(wav):
+        size=struct.unpack_from('<I',wav,off+4)[0]
+        if wav[off:off+4]==b'data':
+            struct.pack_into('<I',wav,off+4,len(wav)-off-8)
+            break
+        off+=8+size+(size%2)
+    return Response(bytes(wav),media_type='audio/wav',headers={'Cache-Control':'no-store'})

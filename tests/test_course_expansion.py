@@ -337,3 +337,16 @@ def test_streaming_speech_auth_and_pcm_bounds(client,auth,monkeypatch):
         assert ws.receive_json()["type"]=="ready"
         ws.send_bytes(b"\x00")
         with pytest.raises(WebSocketDisconnect):ws.receive_json()
+
+
+def test_selected_sentence_uses_indexed_quote_not_model_quote():
+    from app.course_ai import short_sources,validate_selected
+    content="Mitochondria produce ATP through oxidative phosphorylation. ATP provides energy for cellular processes."
+    sources=short_sources([{"document_id":"bio","title":"Biology","page":3,"content":content}])
+    q={"prompt":"Which process produces ATP in mitochondria?","options":["oxidative phosphorylation","osmosis","diffusion","transcription"],"answer":"oxidative phosphorylation","source":"1","evidence":"invented quotation"}
+    def raw():return json.dumps({"questions":[q]})
+    result=validate_selected(raw(),sources,1)[0]
+    assert result["excerpt"]=="Mitochondria produce ATP through oxidative phosphorylation."
+    assert result["page"]==3
+    q["source"]="2"
+    with pytest.raises(ValueError):validate_selected(raw(),sources,1)

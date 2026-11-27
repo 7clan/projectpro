@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from .ai import ai_status, coach, fallback_help, search_sources
 from .engine import Beam, CONCEPTS, MISTAKES_EN, MISTAKES_FR, explanation_check
-from .learning import RESOURCES, profile, resources_for
+from .learning import RESOURCES, profile, resources_for, study_plan
 from .storage import (
     all_rows, create_session, create_user, db, hash_password, init_db,
     now, one, session_user, verify_password,
@@ -336,6 +336,10 @@ def explain(challenge_id: str,payload: Explanation,user=Depends(user_from_token)
         raise HTTPException(409,'Explication déjà soumise ; essaie un autre exercice')
     return {**result,'note':'Checklist pédagogique basée sur des indices textuels, pas une notation de vérité.'}
 
+
+@app.get('/api/study-plan')
+def learner_study_plan(minutes:int=Query(30,ge=10,le=120),user=Depends(user_from_token)):
+    return study_plan(profile(user['id'],user['exam_date']),minutes)
 
 @app.get('/api/resources')
 def resources(user=Depends(user_from_token)):

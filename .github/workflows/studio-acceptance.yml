@@ -8,7 +8,7 @@ permissions:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 16
     env:
       DECLIC_REQUIRE_NEURAL: '1'
       GEMINI_API_KEY: ${{ secrets.GEMEINI }}

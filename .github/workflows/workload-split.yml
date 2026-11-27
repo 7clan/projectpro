@@ -1,0 +1,67 @@
+name: Provider workload split
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/workload-split.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt -r requirements-voice.txt
+      - run: python -m pytest -q
+      - name: Probe configured credentials and workload allocation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMEINI }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+          UNKNOWN_KEY: ${{ secrets.SOME }}
+          DECLIC_GEMINI_TEXT_FALLBACK: '0'
+        run: |
+          mkdir -p workload-evidence
+          python - <<'PY'
+          import asyncio, json, os, logging, pathlib, io, wave, hmac
+          from app.providers import route
+          from app.voice import _gemini_render, _openrouter_render
+          logging.basicConfig(level=logging.INFO)
+          out=pathlib.Path("workload-evidence")
+          report={}
+          key=os.getenv("UNKNOWN_KEY","")
+          known={"OpenRouter":"sk-or-v1-","Groq":"gsk_","Cerebras":"csk-","Google API":"AIza","NVIDIA":"nvapi-","Hugging Face":"hf_"}
+          duplicate=next((n for n in ("GEMINI_API_KEY","OPENROUTER_API_KEY") if key and hmac.compare_digest(key,os.getenv(n,""))),None)
+          report["SOME"]="duplicate of "+duplicate if duplicate else next((n for n,p in known.items() if key.startswith(p)),"unidentified" if key else "not configured")
+          print("SOME provider identification:",report["SOME"],"(no network transmission)",flush=True)
+          def verify(raw):
+              value=json.loads(raw[raw.index("{"):raw.rindex("}")+1])
+              if value.get("answer")!=25:raise ValueError("Incorrect response")
+              return value
+          async def main():
+              result=await route('Return only JSON: {"answer":25}. Calculate 3 squared plus 4 squared.',verify,budget=500,role="coach")
+              report["router_text"]={"passed":bool(result and result[1]=="openrouter"),"model":result[2] if result else None}
+              print("TEXT",report["router_text"],flush=True)
+              text="Bonjour. Trois au carré plus quatre au carré égale vingt-cinq."
+              for name,engine in [("gemini",_gemini_render),("heygen",_openrouter_render)]:
+                  try:
+                      audio,cues=await asyncio.wait_for(engine(text,"fr",[0,.5]),30)
+                      with wave.open(io.BytesIO(audio),"rb") as w:
+                          duration=w.getnframes()/w.getframerate()
+                          assert duration>0 and len(cues)>=2 and any(w.readframes(w.getnframes()))
+                      assert all(0<=m["time"]<duration for m in cues)
+                      (out/(name+".wav")).write_bytes(audio)
+                      report[name]={"passed":True,"seconds":round(duration,2),"cues":cues}
+                  except Exception as exc:
+                      report[name]={"passed":False,"reason":type(exc).__name__}
+                  print("SPEECH",name,report[name],flush=True)
+              (out/"results.json").write_text(json.dumps(report,indent=2))
+          asyncio.run(main())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-provider-workload-evidence
+          path: workload-evidence/

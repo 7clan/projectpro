@@ -1,0 +1,99 @@
+name: Assemble ordered DECLIC demonstration videos
+on:
+  workflow_dispatch:
+  push:
+    branches: ['test/statics-lab-5725549']
+    paths: ['.github/workflows/demo-video-collection.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: 7clan/projectpro
+    steps:
+      - name: Collect original recordings
+        run: |
+          set -euo pipefail
+          mkdir -p raw
+          gh run download 46000503063 -n DECLIC-full-narrated-walkthrough -D raw/01
+          gh run download 46084435987 -n DECLIC-statics-simple-narrated-video -D raw/02
+          gh run download 46016349926 -n DECLIC-course-expansion-evidence -D raw/03
+          gh run download 46005345422 -n DECLIC-real-app-session -D raw/04
+          gh run download 46015771822 -n DECLIC-local-speech-evidence -D raw/05
+          gh run download 46013811482 -n DECLIC-ollama-audiovisual-evidence -D raw/06
+          gh run download 46059961381 -n DECLIC-main-classroom-video-and-evidence -D raw/07
+          gh run download 46059961381 -n DECLIC-main-voice_pdf-video-and-evidence -D raw/08
+          gh run download 46075578517 -n DECLIC-live-AI-bilingual-audible-proof -D raw/09
+          gh run download 46055317054 -n real-scientific-visual-acceptance -D raw/10
+      - name: Organize and inspect actual media
+        run: |
+          python - <<'PY'
+          import pathlib, shutil, subprocess, json, html
+          root=pathlib.Path("DECLIC-video-collection")
+          root.mkdir()
+          entries=[
+            ("01","01 - Start here - full narrated application",46000503063,"Passed; older main. Overview, library, coach, Studio, learning plan. Narrated."),
+            ("02","02 - Statics Lab - slow English explanation",46084435987,"Passed; restored main 5725549 plus test-only changes. Piper explanatory voice-over."),
+            ("03","03 - PDF quiz and classroom workflow",46016349926,"Passed; older main. PDF quizzes, teacher assignment, student submission, teacher score and conceptual practice. Automated recording may be fast or silent."),
+            ("04","04 - Live AI Studio and full app session",46005345422,"Passed; older main. Real AI lessons and follow-up; actual HeyGen app audio."),
+            ("05","05 - Microphone and speech recognition",46015771822,"Passed; older main. Real Vosk browser streaming with synthetic microphone audio, not physical microphone."),
+            ("06","06 - Offline AI geometry and physics",46013811482,"Passed; older main. Ollama local model and Piper synchronized narration."),
+            ("07","90 - Additional classroom recording - partial",46059961381,"PARTIAL: class and three learners, first assignment scores 2/6, 4/6, 3/6, actual AI coaching and audible lesson passed. Second assignment timed out."),
+            ("08","91 - Additional voice and PDF recording - partial",46059961381,"PARTIAL: live spoken questions and unique PDF fact passed; citation navigation and coach citation failed. Virtual microphone."),
+            ("09","92 - Experimental bilingual voices - later branch",46075578517,"LATER BRANCH, not current main: George/Tom voices and mixed live/guided lessons. Some turns had no live model."),
+            ("10","93 - Experimental science visuals - later branch",46055317054,"LATER BRANCH, not current main. Scientific visual examples, not proof of restored version.")
+          ]
+          report=[]; items=[]
+          for key,title,run,note in entries:
+              dest=root/title
+              dest.mkdir()
+              src=pathlib.Path("raw")/key
+              files=sorted(p for p in src.rglob("*") if p.is_file() and p.suffix.lower() in (".mp4",".webm",".mov",".mkv"))
+              print("GROUP",key,"videos",len(files),flush=True)
+              if not files:
+                  (dest/"NO-VIDEO.txt").write_text("No video file was present in the original artifact. See the original run for evidence.")
+              for i,p in enumerate(files,1):
+                  name=f"{i:02d} - {p.name}"
+                  out=dest/name
+                  shutil.copy2(p,out)
+                  probe=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(out)],capture_output=True,text=True)
+                  if probe.returncode: raise RuntimeError(f"Invalid video {out}")
+                  meta=json.loads(probe.stdout)
+                  assert any(s.get("codec_type")=="video" for s in meta.get("streams",[])),out
+                  duration=float(meta.get("format",{}).get("duration",0))
+                  assert duration>0,out
+                  audio=any(s.get("codec_type")=="audio" for s in meta["streams"])
+                  report.append({"group":title,"file":str(out.relative_to(root)),"duration_seconds":round(duration,2),"audio_track":audio,"bytes":out.stat().st_size,"run":run})
+                  print("VIDEO",str(out.relative_to(root)),round(duration,1),"s","audio",audio,flush=True)
+              (dest/"README.txt").write_text(note+"\nOriginal evidence: https://github.com/7clan/projectpro/actions/runs/"+str(run)+"\n",encoding="utf-8")
+              items.append((title,note,run,[x for x in report if x["group"]==title]))
+          assert any(x["group"].startswith("01") for x in report)
+          assert any(x["group"].startswith("02") for x in report)
+          (root/"video-index.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
+          lines=["DECLIC - VIDEO VIEWING ORDER","Open START-HERE.html or watch folders 01 through 06 in order.","Folders 90-93 are optional technical evidence, not fully passed current-main demos.","These are original recordings from different historical revisions, not a single new recording of current main.",""]
+          h=["<!doctype html><meta charset=utf-8><title>DECLIC video collection</title><style>body{font:16px system-ui;max-width:900px;margin:40px auto;padding:0 20px;color:#202432;background:#f7f7fa}section{background:white;padding:20px;margin:16px 0;border:1px solid #ddd;border-radius:12px}a{color:#5146a5}video{width:100%;max-height:540px;background:#111}small{color:#666}</style><h1>DÉCLIC — video collection</h1><p>Watch folders 01–06 in order. Optional evidence from partial tests or later branches is numbered 90–93. Original videos are unmodified.</p>"]
+          from urllib.parse import quote
+          for title,note,run,vids in items:
+              lines.append(title+"\n"+note)
+              h.append("<section><h2>"+html.escape(title)+"</h2><p>"+html.escape(note)+"</p>")
+              for v in vids:
+                  path=quote(v["file"])
+                  mins,secs=divmod(round(v["duration_seconds"]),60)
+                  label=f"{mins}:{secs:02d}"+(" | audio track" if v["audio_track"] else " | no audio track")
+                  lines.append("  "+v["file"]+" ("+label+")")
+                  h.append("<p><a href='"+path+"'>"+html.escape(pathlib.Path(v["file"]).name)+"</a> <small>"+label+"</small></p><video controls preload='none' src='"+path+"'></video>")
+              h.append("<p><a href='https://github.com/7clan/projectpro/actions/runs/"+str(run)+"'>Original GitHub evidence</a></p></section>")
+              lines.append("")
+          (root/"START-HERE.txt").write_text("\n".join(lines),encoding="utf-8")
+          (root/"START-HERE.html").write_text("".join(h),encoding="utf-8")
+          print("TOTAL VIDEOS",len(report),"TOTAL SECONDS",sum(x["duration_seconds"] for x in report),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DECLIC-ordered-video-collection
+          path: DECLIC-video-collection/
+          compression-level: 0

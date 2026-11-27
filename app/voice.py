@@ -123,7 +123,7 @@ async def synthesize_preferred(text,lang,cues,cloud=False):
     split_cues(text,cues)
     if cloud and time.monotonic()>=_cloud_retry_at:
         try:
-            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),35)
+            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),22)
             return audio,marks,'gemini-neural'
         except CloudRateLimited as exc:
             _cloud_retry_at=max(_cloud_retry_at,time.monotonic()+exc.seconds)
@@ -132,7 +132,7 @@ async def synthesize_preferred(text,lang,cues,cloud=False):
             logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
     if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
         try:
-            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),20)
+            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),14)
             return audio,marks,"openrouter-heygen-neural"
         except CloudRateLimited as exc:
             _router_voice_retry_at=time.monotonic()+exc.seconds

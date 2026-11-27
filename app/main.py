@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import fitz
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -491,7 +491,8 @@ class StudioRequest(BaseModel):
     generative: bool = False
 
 @app.post('/api/studio')
-async def studio(payload:StudioRequest,user=Depends(user_from_token)):
+async def studio(payload:StudioRequest,request:Request,user=Depends(user_from_token)):
+    from .cancellation import until_disconnect
     from .studio import teach
     row=owned_challenge(payload.challenge_id,user['id']) if payload.challenge_id else None
     if row and row['kind']=='transfer' and not one("SELECT id FROM attempts WHERE user_id=? AND challenge_id=? AND stage='transfer'",(user['id'],row['id'])):
@@ -502,10 +503,10 @@ async def studio(payload:StudioRequest,user=Depends(user_from_token)):
     history=[x.model_dump() for x in payload.history]
     if payload.generative and payload.consent_external:
         from .whiteboard import generate
-        result=await generate(payload.question,payload.lang,sources,history)
+        result=await until_disconnect(request,generate(payload.question,payload.lang,sources,history))
         if result is not None:
             return result
-    result=await teach(payload.question,b,payload.lang,sources,history,payload.consent_external)
+    result=await until_disconnect(request,teach(payload.question,b,payload.lang,sources,history,payload.consent_external))
     result['visual_mode']='predefined'
     if payload.generative:
         result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'
@@ -513,7 +514,8 @@ async def studio(payload:StudioRequest,user=Depends(user_from_token)):
 
 
 @app.post('/api/studio/audio')
-async def studio_audio(payload: dict, user=Depends(user_from_token)):
+async def studio_audio(payload: dict, request:Request,user=Depends(user_from_token)):
+    from .cancellation import until_disconnect
     import asyncio
     import json
     from .voice import synthesize_preferred
@@ -523,7 +525,7 @@ async def studio_audio(payload: dict, user=Depends(user_from_token)):
     if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en') or not isinstance(cues,list) or len(cues)>32:
         raise HTTPException(422,'Invalid narration')
     try:
-        audio,marks,backend=await asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True),45)
+        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True),45))
     except (ValueError,TypeError):
         raise HTTPException(422,'Invalid narration or cue')
     except (FileNotFoundError,asyncio.TimeoutError):

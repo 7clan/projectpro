@@ -350,3 +350,54 @@ def test_selected_sentence_uses_indexed_quote_not_model_quote():
     assert result["page"]==3
     q["source"]="2"
     with pytest.raises(ValueError):validate_selected(raw(),sources,1)
+
+
+def test_ollama_cloud_uses_desktop_connection_and_never_leaks_into_offline(monkeypatch):
+    from app.providers import candidates,complete,use_mode,configured_modes,route
+    from app.ai import ai_status
+    import httpx
+    monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+    monkeypatch.setenv("DECLIC_OLLAMA_MODEL","qwen2.5-coder:3b")
+    monkeypatch.setenv("DECLIC_OLLAMA_CLOUD_MODEL","nemotron-3-super:cloud")
+    assert configured_modes()["ollama_cloud"]
+    async def check():
+        with use_mode("ollama_cloud",False):
+            assert await candidates(None)==[]
+            assert not ai_status()["enabled"]
+        with use_mode("local",True):
+            assert await candidates(None)==[("ollama","qwen2.5-coder:3b","")]
+        with use_mode("ollama_cloud",True):
+            assert await candidates(None)==[("ollama_cloud","nemotron-3-super:cloud","")]
+            assert ai_status()["provider"]=="ollama_cloud"
+            def handler(req):
+                assert str(req.url)=="http://127.0.0.1:11434/api/chat"
+                assert "Authorization" not in req.headers
+                body=json.loads(req.content)
+                assert body["model"]=="nemotron-3-super:cloud"
+                assert "format" not in body and body["stream"] is False
+                return httpx.Response(200,json={"message":{"content":'{"answer":25}'}})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                assert json.loads(await complete(client,"ollama_cloud","nemotron-3-super:cloud","","test"))["answer"]==25
+        monkeypatch.setenv("DECLIC_LOCAL_ONLY","1")
+        with use_mode("ollama_cloud",True):
+            assert await candidates(None)==[("ollama","qwen2.5-coder:3b","")]
+            assert not configured_modes()["ollama_cloud"]
+    asyncio.run(check())
+
+def test_ollama_cloud_route_is_explicit_and_does_not_fall_back(monkeypatch):
+    from app import providers
+    monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+    monkeypatch.setenv("DECLIC_OLLAMA_CLOUD_MODEL","glm-5.3-flash:cloud")
+    monkeypatch.setenv("DECLIC_OLLAMA_MODEL","local-model")
+    monkeypatch.setenv("GEMINI_API_KEY","test-key")
+    called=[]
+    async def fake_complete(client,provider,model,key,prompt,budget):
+        called.append((provider,model))
+        return '{"answer":25}'
+    monkeypatch.setattr(providers,"complete",fake_complete)
+    async def run():
+        with providers.use_mode("ollama_cloud",True):
+            result=await providers.route("test",json.loads)
+        assert result[1:] == ("ollama_cloud","glm-5.3-flash:cloud")
+        assert called==[("ollama_cloud","glm-5.3-flash:cloud")]
+    asyncio.run(run())

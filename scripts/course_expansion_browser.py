@@ -131,6 +131,15 @@ with sync_playwright() as p:
     expect(page.locator("#studio-barge")).to_be_visible()
     assert not page.locator("#studio-barge").is_checked()
     check(page,"16-barge-in-opt-in-control")
+    page.locator("#provider-panel summary").click()
+    page.locator("#provider-check").click()
+    expect(page.locator("#provider-results p")).to_have_count(4)
+    for name in ("ollama","gemini","openrouter","bazaarlink"):
+        expect(page.locator("#provider-results")).to_contain_text(name)
+    check(page,"17-all-provider-status")
+    m.locator('[data-view="studio"]').click()
+    assert m.evaluate("document.documentElement.scrollWidth<=innerWidth+2")
+    check(m,"18-mobile-studio-provider-layout")
     assert not errors,errors
     learner.close()
     teacher.close()

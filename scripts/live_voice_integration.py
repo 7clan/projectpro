@@ -31,6 +31,7 @@ with sync_playwright() as p:
     rec=subprocess.Popen(["ffmpeg","-hide_banner","-loglevel","error","-y","-thread_queue_size","512","-f","x11grab","-framerate","20","-video_size","1440x900","-i",os.environ["DISPLAY"],"-thread_queue_size","512","-f","pulse","-i","declic.monitor","-c:v","libx264","-preset","ultrafast","-crf","24","-pix_fmt","yuv420p","-c:a","aac","-movflags","+faststart",str(out/(lang+".mp4"))],stdin=subprocess.PIPE)
     try:
         if lang=="en":questions=questions+["whats the latest update on gold worth?","whats the latest update on gold worth in us dollars?","could you explain more ? do you have current price of gold in us dollars?","could you explain more ? do you have current price of gold in us dollars?","im only talking about gold and not math"]
+        questions=questions+(["Explain how photosynthesis converts light energy into chemical energy inside a green leaf. Show the inputs and outputs."] if lang=="en" else ["Explique la photosynthèse dans une feuille verte : comment la lumière permet de produire du glucose et de l’oxygène."])
         for i,question in enumerate(questions):
             result={"lang":lang,"turn":i+1,"question":question,"pass":False}
             audio=[]
@@ -46,11 +47,19 @@ with sync_playwright() as p:
                 lesson=response.json()
                 (out/(lang+f"-turn{i+1}.json")).write_text(json.dumps(lesson,ensure_ascii=False,indent=2))
                 result.update({"mode":lesson.get("mode"),"visual_mode":lesson.get("visual_mode"),"provider":lesson.get("provider"),"model":lesson.get("model")})
-                fresh=lang=="en" and i>=2
+                fresh=lang=="en" and 2<=i<=6
                 if fresh:
                     assert response.status==200 and lesson["visual_mode"]=="information" and "live data feed" in lesson["steps"][0]["narration"] and "triangle" not in json.dumps(lesson).lower()
                 else:assert response.status==200 and lesson.get("mode")=="live_ai" and lesson.get("visual_mode")=="generated" and lesson.get("provider") in ("openrouter","bazaarlink","gemini") and lesson.get("model"),"No genuine cloud-generated lesson"
                 if not fresh:assert len(lesson["steps"])>=2
+                if i==1:
+                    initial=json.loads((out/(lang+"-turn1.json")).read_text())
+                    assert all(a["narration"]!=b["narration"] for a,b in zip(initial["steps"],lesson["steps"])),"Follow-up merely repeats initial explanation"
+                    assert any(x.get("op")=="pythagoras" for x in lesson.get("numerical_checks",[]))
+                if i==len(questions)-1:
+                    semantic=" ".join(s["title"]+" "+s["narration"] for s in lesson["steps"]).casefold()
+                    assert any(k in semantic for k in ("photosynth","chlorophyll","chlorophylle","glucose","chloroplast"))
+                    assert "pythagor" not in semantic and "hypoten" not in semantic and "hypotén" not in semantic
                 payload=response.request.post_data_json
                 assert payload["ai_mode"]=="cloud" and payload["consent_external"] and payload["generative"]
                 if i==1:assert any(questions[0] in h.get("text","") for h in payload["history"]),"Missing first turn context"
@@ -91,4 +100,4 @@ with sync_playwright() as p:
     print("VIDEO",lang,"max_volume",m.group(1) if m else "none",flush=True)
     if any(x["pass"] and x["lang"]==lang for x in results):assert m and float(m.group(1))>-45,"Silent recording"
  browser.close()
-assert len(results)==9 and all(x["pass"] for x in results),"Live end-to-end acceptance incomplete; inspect results and recordings"
+assert len(results)==11 and all(x["pass"] for x in results),"Live end-to-end acceptance incomplete; inspect results and recordings"

@@ -8,10 +8,11 @@ permissions:
 jobs:
   demo:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
-      OPENROUTER_MODEL: google/gemini-2.5-flash
+      OPENROUTER_MODEL: openrouter/free
+      OPENROUTER_BOARD_MODEL: openrouter/free
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,7 +51,7 @@ jobs:
               results=[]
               for question in ['Explique le théorème de Pythagore avec un triangle et les carrés construits sur ses côtés.', 'Maintenant montre comment fonctionne une file FIFO en informatique avec des éléments qui se déplacent.']:
                   page.locator('#studio-question').fill(question)
-                  with page.expect_response(lambda r:'/api/studio' in r.url and r.request.method=='POST',timeout=155000) as event:
+                  with page.expect_response(lambda r:'/api/studio' in r.url and r.request.method=='POST',timeout=210000) as event:
                       page.locator('#studio-send').click()
                   payload=event.value.json()
                   assert payload['mode']=='live_ai',payload.get('notice')

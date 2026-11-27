@@ -1,0 +1,34 @@
+name: HTTPS private staging smoke test
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/https-staging.yml']
+permissions:
+  contents: read
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DECLIC_DOMAIN: localhost
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated local HTTPS stack
+        run: docker compose -f compose.yml -f compose.https.yml up --build -d
+      - name: Verify trusted TLS, redirect and live API
+        run: |
+          set -eu
+          CADDY=$(docker compose -f compose.yml -f compose.https.yml ps -q caddy)
+          for i in $(seq 1 60); do
+            docker cp "$CADDY:/data/caddy/pki/authorities/local/root.crt" /tmp/declic-root.crt 2>/dev/null && curl --silent --fail --cacert /tmp/declic-root.crt https://localhost/api/health && break
+            sleep 1
+          done
+          docker compose -f compose.yml -f compose.https.yml exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+          curl -fsS --cacert /tmp/declic-root.crt -D /tmp/tls-headers.txt https://localhost/api/health
+          grep -qi '^strict-transport-security:' /tmp/tls-headers.txt
+          grep -qi '^content-security-policy:' /tmp/tls-headers.txt
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/api/health)" = 308
+          SSL_CERT_FILE=/tmp/declic-root.crt python scripts/healthcheck.py https://localhost/api/health
+          echo "PASS: HTTPS with trusted local CA, redirect, security headers and health monitoring probe"
+      - if: always()
+        run: docker compose -f compose.yml -f compose.https.yml down -v

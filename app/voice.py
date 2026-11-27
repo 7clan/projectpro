@@ -9,8 +9,11 @@ import wave
 
 def split_cues(text,cues):
     # Align each requested fractional text position with the beginning of a word.
+    text=text.strip()
     boundaries=[m.start() for m in re.finditer(r"\S+",text)]
     if not boundaries: raise ValueError("Empty narration")
+    if len(boundaries)>17:
+        boundaries=[boundaries[round(i*(len(boundaries)-1)/16)] for i in range(17)]
     groups={0:[0.0]}
     for f in sorted(set(cues)):
         if type(f) not in (int,float) or not math.isfinite(f) or not 0<=f<=.9: raise ValueError("Invalid cue")

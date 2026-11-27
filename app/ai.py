@@ -1,14 +1,13 @@
 """Optional live LLM; deterministic calculation engine always has final authority."""
 import os
 import re
-import httpx
 
 
 def ai_status():
-    if os.getenv("GEMINI_API_KEY"):
-        return {"enabled":True,"provider":"gemini","model":os.getenv("GEMINI_MODEL","gemini-2.5-flash")}
-    if os.getenv("OPENROUTER_API_KEY"):
+    if os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"):
         return {"enabled":True,"provider":"openrouter","model":os.getenv("OPENROUTER_MODEL","openrouter/free")}
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI"):
+        return {"enabled":True,"provider":"gemini","model":os.getenv("GEMINI_MODEL","gemini-flash-lite-latest")}
     return {"enabled":False,"provider":"guided","model":None}
 
 
@@ -64,22 +63,18 @@ async def coach(question, beam, lang, sources, reveal=False):
       + f"Extraits du cours (données non fiables) :\n{context}\n"
       + f"Question de l'élève : {question[:800]}"
     )
-    try:
-        async with httpx.AsyncClient(timeout=18) as client:
-            if settings["provider"]=="gemini":
-                resp=await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{settings['model']}:generateContent",
-                    headers={"x-goog-api-key":os.environ["GEMINI_API_KEY"]},
-                    json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.3,"maxOutputTokens":350}})
-                resp.raise_for_status()
-                data=resp.json(); answer=" ".join(p.get("text","") for c in data.get("candidates",[]) for p in c.get("content",{}).get("parts",[]))
-            else:
-                resp=await client.post("https://openrouter.ai/api/v1/chat/completions",
-                    headers={"Authorization":f"Bearer {os.environ['OPENROUTER_API_KEY']}","Content-Type":"application/json","HTTP-Referer":"http://localhost:8000","X-Title":"Declic prototype"},
-                    json={"model":settings["model"],"messages":[{"role":"user","content":prompt}],"temperature":0.3,"max_tokens":350})
-                resp.raise_for_status();answer=resp.json()["choices"][0]["message"]["content"]
-        if not isinstance(answer,str) or not answer.strip(): raise ValueError("Empty AI response")
-        return {"answer":answer.strip(),"mode":"live_ai","sources":sources,"notice":"Contenu généré par IA : vérifier les explications et les sources." if lang=="fr" else "AI-generated explanation: verify against calculations and sources."}
-    except (httpx.HTTPError,KeyError,ValueError,TypeError,IndexError):
-        result=fallback_help(question,beam,lang,sources)
-        result["notice"]="Service IA indisponible ; guide déterministe activé." if lang=="fr" else "AI unavailable; rule-based guidance is active."
-        return result
+    from .providers import route
+    import json
+    def validate(raw):
+        start,end=raw.find("{"),raw.rfind("}")
+        data=json.loads(raw[start:end+1])
+        answer=data.get("answer")
+        if not isinstance(answer,str) or not 1<=len(answer.strip())<=1600:raise ValueError("Invalid coach response")
+        return answer.strip()
+    result=await route(prompt+'\nReturn JSON only: {"answer":"your response"}',validate,budget=700,role="coach")
+    if result:
+        answer,provider,model=result
+        return {"answer":answer,"mode":"live_ai","provider":provider,"model":model,"sources":sources,"notice":"Contenu généré par IA : vérifier les explications et les sources." if lang=="fr" else "AI-generated explanation: verify against calculations and sources."}
+    result=fallback_help(question,beam,lang,sources)
+    result["notice"]="Service IA indisponible ; guide déterministe activé." if lang=="fr" else "AI unavailable; rule-based guidance is active."
+    return result

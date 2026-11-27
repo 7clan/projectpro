@@ -161,3 +161,14 @@ function wire(){document.querySelectorAll('[data-view]').forEach(b=>b.addEventLi
   for(const event of ['mousemove','keydown','touchstart','pointerdown','scroll'])document.addEventListener(event,()=>{state.readerLastActive=Date.now()},{passive:true});setInterval(()=>{if(state.reader && state.currentView==='library' && !state.readerLoading && !document.hidden && document.hasFocus() && Date.now()-state.readerLastActive<30000){state.readerSeconds+=5;if(state.readerSeconds>=20){flushReading().then(loadReaderStats).catch(console.warn)}}},5000);document.addEventListener('visibilitychange',()=>{if(document.hidden)flushReading().catch(console.warn)});window.addEventListener('pagehide',()=>{if(state.reader&&state.readerSeconds>0&&state.token){const seconds=Math.min(60,Math.floor(state.readerSeconds));state.readerSeconds=0;fetch(`/api/documents/${state.reader.id}/events`,{method:'POST',keepalive:true,headers:{Authorization:`Bearer ${state.token}`,'Content-Type':'application/json'},body:JSON.stringify({page:state.reader.page,activity:'active',seconds})}).catch(()=>{});}});
 }
 wire();setLanguage(state.language);if(state.token)setupUser().catch(showError);
+
+document.getElementById('provider-check').onclick=async()=>{
+ const button=$('provider-check'),out=$('provider-results');button.disabled=true;
+ try{
+  const r=await api('/api/providers/status');out.replaceChildren();
+  for(const [name,p] of Object.entries(r.providers)){
+   const info=name==='ollama'?(p.installed?t('Modèle local installé','Local model installed'):p.reachable?t('Serveur actif · modèle absent','Server active · model missing'):t('Serveur local indisponible','Local server unavailable')):p.configured?t('Clé configurée · quota non testé','Key configured · quota not checked'):t('Non configuré','Not configured');
+   out.append(el('p',null,name+(p.model?' · '+p.model:'')+' — '+info));
+  }
+ }catch(e){showError(e)}finally{button.disabled=false}
+};

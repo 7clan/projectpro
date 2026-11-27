@@ -32,6 +32,20 @@ with sync_playwright() as p:
             }""")
             results[str(width)+"-"+view]=audit
             print("AUDIT",width,view,"passes",audit["passes"],"violations",[(v["id"],len(v["nodes"])) for v in audit["violations"]],flush=True)
+        page.locator('[data-view="studio"]').click()
+        page.locator("#studio-voice").uncheck()
+        # Intentionally crowded synthetic lesson: tests renderer, not live AI generation.
+        steps=[{"scene":"generated","title":"Collision test","formula":"6 / 2 = 3","narration":"Six divided by two equals three.","objects":[]}]
+        steps[0]["objects"]=[{"kind":"rect","x":100,"y":100,"w":100,"h":60,"color":"blue","motion":"none","at":0}]+[{"kind":"text","text":label,"x":300,"y":160,"size":18,"color":"ink","motion":"fade","at":0} for label in ["Force = 6 N","Mass = 2 kg","Acceleration = 3 m/s²","Net force"]]
+        page.route("**/api/studio",lambda route:route.fulfill(json={"mode":"guided_offline","visual_mode":"generated","steps":steps,"sources":[],"notice":"Synthetic renderer regression"}))
+        page.locator("#studio-question").fill("Test renderer")
+        page.locator("#studio-send").click()
+        expect(page.locator('#studio-svg [data-generated="text"]')).to_have_count(4)
+        assert page.locator('#studio-svg [data-label-collision="true"]').count()==0
+        expect(page.get_by_role("img",name="Collision test. Six divided by two equals three.")).to_be_visible()
+        page.screenshot(path=str(out/(str(width)+"-collision-test.png")))
+        results[str(width)+"-crowded-labels"]={"passed":True,"labels":4,"collisions":0}
+        print("PASS crowded labels and accessible diagram",width,flush=True)
         page.locator('[data-view="lab"]').click()
         page.locator("#tab-predict").focus()
         page.keyboard.press("Enter")

@@ -114,7 +114,7 @@ with sync_playwright() as p:
     checkpoint(page,"07-source-grounded-offline-studio")
     source=lesson["sources"][0]
     page.locator("#studio-sources button").first.click()
-    page.wait_for_function("state.currentView==='library' && state.reader && !state.readerLoading")
+    page.wait_for_function("(source)=>state.currentView==='library' && state.reader && state.reader.id===source.document_id && state.reader.page===source.page && !state.readerLoading",arg=source)
     assert page.evaluate("state.reader.id")==source["document_id"]
     assert page.evaluate("state.reader.page")==source["page"]
     checkpoint(page,"08-source-exact-page")

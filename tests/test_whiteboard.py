@@ -21,3 +21,12 @@ def test_ignores_untrusted_fields():
     data=board()
     data["steps"][0]["objects"][0]["onclick"]="alert(1)"
     assert "onclick" not in validate_board(json.dumps(data))[0]["objects"][0]
+
+
+def test_compact_format_expands_safe_geometry():
+    from app.whiteboard import validate_compact
+    d={"s":[{"h":"Triangle","e":"a²+b²=c²","n":"Observe the triangle.","o":[{"k":"polygon","p":[[40,40],[40,120],[100,120]],"c":"blue","m":"grow","f":0.2},{"k":"text","p":[90,150,18],"v":"c"}]} for _ in range(2)]}
+    steps=validate_compact(json.dumps(d))
+    assert steps[0]["objects"][0]["points"]==[[40,40],[40,120],[100,120]]
+    d["s"][0]["o"][0]["k"]="script"
+    with pytest.raises(ValueError): validate_compact(json.dumps(d))

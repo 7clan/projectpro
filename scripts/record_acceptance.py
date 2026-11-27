@@ -30,8 +30,8 @@ with sync_playwright() as p:
             page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter')")
             page.locator('[data-view="studio"]').click()
             page.locator("#studio-consent").check()
-            page.locator("#studio-voice").check()
-            if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1":page.locator("#studio-voice-engine").select_option("cloud")
+            # Avoid spending speech quota on autoplay before recording.
+            page.locator("#studio-voice").uncheck()
             page.evaluate("""() => {
                 window.studioTrace=[];
                 document.querySelector('#studio-svg').addEventListener('studio:reveal',e=>window.studioTrace.push({...e.detail,wall:performance.now()}));
@@ -51,18 +51,21 @@ with sync_playwright() as p:
             result["reference_replay"]=fixture_mode
             result["model"]=lesson.get("model")
             # Replay from the beginning so both streams start together and no generation wait dominates the clip.
-            page.locator("#studio-play").click()
+            if "Stop" in page.locator("#studio-play").inner_text():page.locator("#studio-play").click()
             page.locator("#studio-steps button").first.click()
+            if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1":page.locator("#studio-voice-engine").select_option("cloud")
+            page.locator("#studio-voice").check()
             page.evaluate("window.studioTrace=[]")
             rec=subprocess.Popen(["ffmpeg","-hide_banner","-loglevel","error","-y","-thread_queue_size","512","-f","x11grab","-framerate","20","-video_size","1440x900","-i",os.environ["DISPLAY"],"-thread_queue_size","512","-f","pulse","-i","declic.monitor","-c:v","libx264","-preset","ultrafast","-crf","25","-pix_fmt","yuv420p","-c:a","aac","-movflags","+faststart",str(out/(label+".mp4"))],stdin=subprocess.PIPE)
             time.sleep(1)
             page.locator("#studio-play").click()
-            page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=30000)
+            page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
             assert int(page.locator("#studio-svg").get_attribute("data-cue-count") or 0)>0
             result["voice_backend"]=page.locator("#studio-svg").get_attribute("data-voice-backend")
             if os.getenv("DECLIC_REQUIRE_NEURAL")=="1": assert result["voice_backend"]=="piper-neural",result["voice_backend"]
             if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1": assert result["voice_backend"]=="gemini-neural",result["voice_backend"]
-            page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=150000)
+            page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
+            if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1":assert page.locator("#studio-svg").get_attribute("data-voice-backend")=="gemini-neural","Final scene did not use cloud voice"
             assert page.locator("#studio-svg").get_attribute("data-audio")=="ended"
             trace=page.evaluate("window.studioTrace")
             (out/(label+".trace.json")).write_text(json.dumps(trace,ensure_ascii=False,indent=2))

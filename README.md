@@ -149,3 +149,14 @@ DÉCLIC is an independently developed competition prototype, not endorsed by the
 Open Ollama from the Start menu. In PowerShell, run `ollama list` to inspect installed models. If no suitable model is installed, `ollama pull qwen2.5:3b-instruct` downloads a relatively small multilingual model (about 1.9 GB). From the repository folder, run `powershell -ExecutionPolicy RemoteSigned -File .\start-local.ps1` and select an installed local model. If a downloaded script is blocked, inspect its contents and use `Unblock-File .\start-local.ps1` only if you trust it. The launcher creates a virtual environment if needed and installs dependencies. Alternatively set `DECLIC_OLLAMA_MODEL` and `DECLIC_LOCAL_ONLY=1` in your current terminal before starting Uvicorn. Local-only mode permits original animations without external sharing consent. Keep external consent unchecked. For additional privacy set `OLLAMA_NO_CLOUD=1` in the Windows user environment and restart Ollama, as described in [Ollama's local FAQ](https://docs.ollama.com/faq). `ollama ps` shows whether a model is using CPU or GPU. Install Piper separately for offline neural speech. Use `-Hybrid` on the launcher only if you want cloud fallbacks with explicit external consent; keys must be configured on your laptop.
 
 The GitHub Actions [Ollama acceptance workflow](.github/workflows/ollama-acceptance.yml) installs its own local model and captures actual generated lessons with Piper audio. It cannot use your laptop's Ollama server.
+
+
+### Extended learning and voice features
+
+The Quiz screen offers exact-source recall plus deterministic RDM2 conceptual MCQs with selectable difficulty and adaptation based on prior statics attempts. Classes support publishing and completing statics assignments, score reports and weekly practice trends. Teacher identity remains unverified unless explicitly approved by an operator after an external check. Assignment due dates are informational.
+
+Experimental voice interruption uses local microphone amplitude detection with echo cancellation, then invokes the browser speech recognizer. Use a headset, opt in and continue speaking after interruption. This is not full-duplex streaming, and the recognizer may use the browser vendor's service. Permission must be tested on real hardware.
+
+Small local Ollama models generate schema-constrained semantic plans (triangle, force and flow diagrams) rather than unrestricted SVG instructions. The application validates supported relationships and checks the diagram against recognized question types and explicit numeric parameters; no unrestricted academic guarantee is implied. For local-only operation install Piper separately and keep the external service consent off.
+
+For public hosting preparation and physical-device testing, see [deployment instructions](docs/DEPLOYMENT.md).

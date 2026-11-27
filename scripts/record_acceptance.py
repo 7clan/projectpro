@@ -12,6 +12,8 @@ cases=[
     ("geometry","Montre le théorème de Pythagore sur un triangle rectangle 3, 4, 5, avec les aires 9, 16, 25 et des couleurs distinctes."),
     ("physics","Montre la deuxième loi de Newton pour une masse de 2 kg et une force de 6 N, avec une accélération de 3 m/s² et des vecteurs animés.")
 ]
+fixture_mode=os.getenv("DECLIC_REFERENCE_REPLAY")=="1"
+fixtures=json.loads(pathlib.Path("scripts/reference_lessons.json").read_text()) if fixture_mode else None
 results=[]
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=False,ignore_default_args=["--mute-audio"],args=["--window-size=1440,900","--window-position=0,0","--start-maximized","--autoplay-policy=no-user-gesture-required"])
@@ -33,13 +35,19 @@ with sync_playwright() as p:
                 window.studioTrace=[];
                 document.querySelector('#studio-svg').addEventListener('studio:reveal',e=>window.studioTrace.push({...e.detail,wall:performance.now()}));
             }""")
+            if fixture_mode:
+                from app.whiteboard import validate_board
+                steps=validate_board(json.dumps(fixtures[label]))
+                replay={"mode":"live_ai","visual_mode":"generated","steps":steps,"sources":[],"notice":"REFERENCE REPLAY — AI-authored test lesson; no live API call."}
+                page.route("**/api/studio",lambda route:route.fulfill(json=replay))
             page.locator("#studio-question").fill(question)
             with page.expect_response(lambda r:'/api/studio' in r.url and r.request.method=='POST' and r.url.endswith('/api/studio'),timeout=330000) as event:
                 page.locator("#studio-send").click()
             lesson=event.value.json()
             (out/(label+".json")).write_text(json.dumps(lesson,ensure_ascii=False,indent=2))
             assert lesson.get("mode")=="live_ai" and lesson.get("visual_mode")=="generated",lesson.get("notice")
-            result["generated"]=True
+            result["generated"]=not fixture_mode
+            result["reference_replay"]=fixture_mode
             result["model"]=lesson.get("model")
             # Replay from the beginning so both streams start together and no generation wait dominates the clip.
             page.locator("#studio-play").click()
@@ -77,4 +85,4 @@ with sync_playwright() as p:
             results.append(result)
             (out/"results.json").write_text(json.dumps(results,indent=2))
     browser.close()
-assert all(r.get("generated") and r.get("synchronized_reveal") and r.get("audible") for r in results),results
+assert all((r.get("reference_replay") if fixture_mode else r.get("generated")) and r.get("synchronized_reveal") and r.get("audible") for r in results),results

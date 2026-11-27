@@ -72,7 +72,12 @@ function drawGenerated(step,animate=false){
 
 function add(role,content){const node=document.createElement('div');node.className='studio-message '+role;node.textContent=content;by('studio-chatlog').appendChild(node);by('studio-chatlog').scrollTop=by('studio-chatlog').scrollHeight;}
 function stop(){svg.dataset.audio='stopped';releaseAudio();clearBoardTimers();svg.getAnimations({subtree:true}).forEach(a=>a.cancel());ui.epoch++;ui.playing=false;clearTimeout(ui.timer);if('speechSynthesis'in window)window.speechSynthesis.cancel();by('studio-play').textContent='▶ Play';}
-function render(){const s=ui.steps[ui.index];if(!s)return;if(s.scene==='generated')drawGenerated(s,ui.playing);else draw(s.scene);by('studio-title').textContent=s.title;by('studio-formula').textContent=s.formula;by('studio-caption').textContent=s.narration;by('studio-count').textContent=(ui.index+1)+' / '+ui.steps.length;by('studio-prev').disabled=ui.index===0;by('studio-next').disabled=ui.index===ui.steps.length-1;by('studio-play').disabled=false;by('studio-steps').replaceChildren(...ui.steps.map((x,i)=>{const b=document.createElement('button');b.type='button';b.className=i===ui.index?'active':'';b.setAttribute('aria-label',x.title);b.onclick=()=>{stop();ui.index=i;render();};return b;}));}
+function prettyFormula(value){
+ let s=String(value||'—').replace(/\\(?:text|mathrm|mathbf)\{([^{}]*)\}/g,'$1');
+ for(let i=0;i<6;i++){const next=s.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g,(_,a,b)=>'('+a+') / ('+b+')');if(next===s)break;s=next;}
+ return s.replace(/\\(?:cdot|times)\b/g,' × ').replace(/\\div\b/g,' ÷ ').replace(/\\sqrt\{([^{}]*)\}/g,'√($1)').replace(/\\(?:left|right)\b/g,'').replace(/\^\{?2\}?/g,'²').replace(/\^\{?3\}?/g,'³').replace(/\\,/g,' ').replace(/\\(?:[()[\]])/g,'').replace(/\$/g,'').replace(/\s+/g,' ').trim();
+}
+function render(){const s=ui.steps[ui.index];if(!s)return;if(s.scene==='generated')drawGenerated(s,ui.playing);else draw(s.scene);by('studio-title').textContent=s.title;by('studio-formula').textContent=prettyFormula(s.formula);by('studio-caption').textContent=s.narration;by('studio-count').textContent=(ui.index+1)+' / '+ui.steps.length;by('studio-prev').disabled=ui.index===0;by('studio-next').disabled=ui.index===ui.steps.length-1;by('studio-play').disabled=false;by('studio-steps').replaceChildren(...ui.steps.map((x,i)=>{const b=document.createElement('button');b.type='button';b.className=i===ui.index?'active':'';b.setAttribute('aria-label',x.title);b.onclick=()=>{stop();ui.index=i;render();};return b;}));}
 function play(){
  if(!ui.steps.length)return;
  stop();ui.playing=true;const epoch=ui.epoch;by('studio-play').textContent='■ Stop';

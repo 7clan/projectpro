@@ -17,6 +17,10 @@ if curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
   echo "DÉCLIC already running. Open port 8000 in the Ports tab."
   exit 0
 fi
+if [[ ! -x .venv/bin/python ]] || ! .venv/bin/python -c 'import fastapi, uvicorn, fitz, httpx, multipart, email_validator' >/dev/null 2>&1; then
+  echo "Python environment missing or incomplete; installing core dependencies..."
+  bash .devcontainer/setup.sh --core-only
+fi
 nohup .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 >"$HOME/.cache/declic/server.log" 2>&1 </dev/null &
 echo "$!" > "$HOME/.cache/declic/server.pid"
 for i in $(seq 1 30); do
@@ -27,4 +31,5 @@ for i in $(seq 1 30); do
   sleep 1
 done
 echo "Server did not start. Inspect ~/.cache/declic/server.log" >&2
+tail -n 30 "$HOME/.cache/declic/server.log" >&2 || true
 exit 1

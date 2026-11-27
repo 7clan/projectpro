@@ -13,15 +13,24 @@ def ai_status():
 
 
 def search_sources(pages, question, limit=3):
-    terms=set(re.findall(r"[a-zA-ZÀ-ÿ]{4,}",question.lower())) - {"dans","avec","pour","what","which","comment","quelle","pourquoi","that","this"}
+    """Select matching page passages instead of always citing the first 1000 characters."""
+    terms=set(re.findall(r"[a-zA-ZÀ-ÿ]{4,}",question.casefold())) - {"dans","avec","pour","what","which","comment","quelle","pourquoi","that","this","montre","explique","explain","show"}
+    if not terms: return []
     scores=[]
     for row in pages:
         content=row["content"]
         if not content.strip(): continue
-        score=sum(min(content.lower().count(word),4) for word in terms)
-        if score: scores.append((score,row))
+        folded=content.casefold()
+        hits=[m.start() for term in terms for m in re.finditer(re.escape(term),folded)]
+        if not hits: continue
+        # Search around matched terms. Cap candidate count for large documents.
+        candidates=[0]+[max(0,x-250) for x in sorted(hits)[:80]]
+        best=max(candidates,key=lambda start:sum(min(folded[start:start+1000].count(term),4) for term in terms))
+        snippet=content[best:best+1000].strip()
+        score=sum(min(snippet.casefold().count(term),4) for term in terms)
+        scores.append((score,row,snippet))
     scores.sort(key=lambda pair:-pair[0])
-    return [{"document_id":row["document_id"],"title":row["title"],"page":row["page"],"excerpt":row["content"][:1000]} for score,row in scores[:limit]]
+    return [{"document_id":row["document_id"],"title":row["title"],"page":row["page"],"excerpt":snippet} for score,row,snippet in scores[:limit]]
 
 
 def fallback_help(question, beam, lang, sources):

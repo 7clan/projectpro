@@ -98,13 +98,13 @@ def _pocket_render(text,lang,cues,voice_name):
         chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
     env={k:v for k,v in os.environ.items() if not any(x in k.upper() for x in ("KEY","TOKEN","SECRET","PASSWORD","GEMEINI","OPENROUTER","BAZAARLINK","SOME"))}
     env.update({"RAYON_NUM_THREADS":"2","OMP_NUM_THREADS":"2","MKL_NUM_THREADS":"2","HF_HUB_DISABLE_TELEMETRY":"1"})
-    output=io.BytesIO();marks=[];offset=0
+    output=io.BytesIO();marks=[];offset=0;deadline=time.monotonic()+16
     with _VOICE_LOCK,tempfile.TemporaryDirectory() as folder,wave.open(output,"wb") as w:
         w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
         for i,(fragment,positions) in enumerate(chunks):
             path=Path(folder)/f"phrase-{i}.wav"
             try:
-                subprocess.run([executable,"generate","--language","english_2026-04","--voice",_POCKET_VOICES[voice_name],"--text="+fragment,"--output-path",str(path),"--sampler-decode-steps","3"],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=18,check=True)
+                subprocess.run([executable,"generate","--language","english_2026-04","--voice",_POCKET_VOICES[voice_name],"--text="+fragment,"--output-path",str(path),"--sampler-decode-steps","3"],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=max(.1,deadline-time.monotonic()),check=True)
             except (subprocess.SubprocessError,OSError) as exc:
                 logging.getLogger(__name__).warning("Pocket synthesis failed: %s",type(exc).__name__)
                 raise FileNotFoundError("Pocket voice unavailable") from exc
@@ -190,9 +190,12 @@ def _kokoro_render(text,lang,cues,voice_name):
                 w.writeframes(raw);offset+=samples.size
     return output.getvalue(),marks
 
-def voice_choices():
+def _piper_installed(voice_name):
     directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
-    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]+[{"id":name,"lang":"en","installed":_kokoro_available()} for name in _KOKORO_VOICES]+[{"id":name,"lang":"en","installed":_pocket_executable() is not None} for name in _POCKET_VOICES]
+    return (directory/(voice_name+".onnx")).is_file() and (directory/(voice_name+".onnx.json")).is_file()
+
+def voice_choices():
+    return [{"id":name,"lang":lang,"installed":_piper_installed(name)} for name,lang in _EXTRA_VOICES.items()]+[{"id":name,"lang":"en","installed":_kokoro_available()} for name in _KOKORO_VOICES]+[{"id":name,"lang":"en","installed":_pocket_executable() is not None} for name in _POCKET_VOICES]
 
 
 @lru_cache(maxsize=2)
@@ -258,25 +261,45 @@ async def synthesize_preferred(text,lang,cues,cloud=False,voice_name=None):
             raise ValueError("Unsupported voice for lesson language")
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues,voice_name)
         return audio,marks,"piper-"+voice_name
+    # Prefer the user's proven cloud engine, then Gemini. Reserve time for
+    # local synthesis within the API's 45-second response deadline.
+    if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
+        try:
+            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),10)
+            return audio,marks,"openrouter-heygen-neural"
+        except CloudRateLimited as exc:
+            _router_voice_retry_at=time.monotonic()+exc.seconds
+            logging.getLogger(__name__).warning("OpenRouter speech rate limited; trying next voice")
+        except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
+            _router_voice_retry_at=time.monotonic()+60
+            logging.getLogger(__name__).warning("OpenRouter speech fallback: %s",type(exc).__name__)
     if cloud and time.monotonic()>=_cloud_retry_at:
         try:
-            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),22)
+            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),10)
             return audio,marks,'gemini-neural'
         except CloudRateLimited as exc:
             _cloud_retry_at=max(_cloud_retry_at,time.monotonic()+exc.seconds)
             logging.getLogger(__name__).warning("Cloud voice rate limited; local voice used for %s seconds",exc.seconds)
         except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
             logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
-    if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
+    if lang=="en" and _pocket_executable():
         try:
-            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),14)
-            return audio,marks,"openrouter-heygen-neural"
-        except CloudRateLimited as exc:
-            _router_voice_retry_at=time.monotonic()+exc.seconds
-            logging.getLogger(__name__).warning("OpenRouter speech rate limited; local voice activated")
-        except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
-            _router_voice_retry_at=time.monotonic()+60
-            logging.getLogger(__name__).warning("OpenRouter speech fallback: %s",type(exc).__name__)
+            audio,marks=await asyncio.wait_for(asyncio.to_thread(_pocket_render,text,lang,cues,"pocket-george"),18)
+            return audio,marks,"pocket-george"
+        except (asyncio.TimeoutError,ImportError,OSError,RuntimeError,ValueError,wave.Error) as exc:
+            logging.getLogger(__name__).warning("George unavailable; trying installed fallback: %s",type(exc).__name__)
+    if lang=="fr" and _piper_installed("fr_FR-tom-medium"):
+        try:
+            audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues,"fr_FR-tom-medium")
+            return audio,marks,"piper-fr_FR-tom-medium"
+        except (ImportError,OSError,RuntimeError,ValueError,wave.Error) as exc:
+            logging.getLogger(__name__).warning("Tom unavailable; trying installed fallback: %s",type(exc).__name__)
+    if lang=="en" and _kokoro_available():
+        try:
+            audio,marks=await asyncio.wait_for(asyncio.to_thread(_kokoro_render,text,lang,cues,"kokoro-michael-smooth"),10)
+            return audio,marks,"kokoro-michael-smooth"
+        except (asyncio.TimeoutError,ImportError,OSError,RuntimeError,ValueError,wave.Error) as exc:
+            logging.getLogger(__name__).warning("Michael unavailable; trying Piper: %s",type(exc).__name__)
     try:
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
         return audio,marks,"piper-neural"

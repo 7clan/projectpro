@@ -2,7 +2,7 @@ import io
 import asyncio
 import subprocess
 import time
-from app.voice import synthesize_preferred
+from app.voice import _neural_render
 import json
 import os
 from pathlib import Path
@@ -34,8 +34,7 @@ NARRATION={
 }
 def speak(page,key):
     message=NARRATION[key]
-    audio,_,backend=asyncio.run(synthesize_preferred(message,"en",[0]))
-    assert backend=="piper-neural",backend
+    audio,_=_neural_render(message,"en",[0])
     path=OUT/(key+".wav");path.write_bytes(audio)
     with (OUT/"walkthrough-script.txt").open("a",encoding="utf-8") as script:
         script.write(key+": "+message+"\n")

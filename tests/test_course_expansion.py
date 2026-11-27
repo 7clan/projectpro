@@ -401,3 +401,15 @@ def test_ollama_cloud_route_is_explicit_and_does_not_fall_back(monkeypatch):
         assert result[1:] == ("ollama_cloud","glm-5.3-flash:cloud")
         assert called==[("ollama_cloud","glm-5.3-flash:cloud")]
     asyncio.run(run())
+
+
+def test_local_pythagoras_complete_narration_and_progressive_reveal():
+    from app.local_board import compile_plan
+    scene={"title":"Triangle","speech":"Now look at the squares formed on each side of the","formula":"a² + b² = c²","diagram":"triangle","a":3,"b":4,"label1":"a","label2":"b","label3":"c"}
+    steps,checks=compile_plan(json.dumps({"scenes":[scene,scene]}),"Explain Pythagoras using a triangle with sides 3, 4, 5.","en")
+    assert all(step["narration"].endswith(".") for step in steps)
+    assert "side of the" not in steps[1]["narration"]
+    assert "9 plus 16 equals 25" in steps[1]["narration"]
+    assert "5 units long" in steps[1]["narration"]
+    assert len(steps[0]["objects"])<len(steps[1]["objects"])
+    assert {"9","16","25"} <= {o["text"] for o in steps[1]["objects"] if o["kind"]=="text"}

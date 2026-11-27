@@ -580,3 +580,6 @@ def local_generation_allowed():
 
 from .course_tools import install as install_course_tools
 install_course_tools(app,user_from_token)
+
+from .class_assignments import install as install_assignments
+install_assignments(app,user_from_token)

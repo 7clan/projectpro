@@ -6,6 +6,7 @@ assertions and screenshots accompany each case, even when a case fails.
 import json
 import math
 import os
+import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
@@ -74,10 +75,19 @@ def main():
             try:
                 page.goto("http://127.0.0.1:8000")
                 page.locator("#demo-login").click()
-                expect(page.locator("#ai-mode")).to_contain_text("·",timeout=30000)
+                # Wait until setupUser has actually fetched /api/health and
+                # configured available modes. A single available mode is locked
+                # by design: do not attempt to select it when already chosen.
+                expect(page.locator("#ai-mode")).to_contain_text(
+                    re.compile(r"· (openrouter|gemini|bazaarlink)"),timeout=30000)
                 page.locator('[data-view="studio"]').click()
-                page.evaluate("(lang)=>setLanguage(lang)",lang)
-                page.locator("#studio-ai-mode").select_option("cloud",timeout=30000)
+                if page.locator("html").get_attribute("lang")!=lang:
+                    page.locator("#language").click()
+                mode=page.locator("#studio-ai-mode")
+                if mode.input_value()!="cloud":
+                    mode.select_option("cloud",timeout=30000)
+                expect(mode).to_have_value("cloud")
+                assert page.locator('#studio-ai-mode option[value="cloud"]').get_attribute("disabled") is None,"Cloud mode unavailable"
                 page.locator("#studio-consent").check()
                 page.locator("#studio-generative").check()
                 page.locator("#studio-voice").uncheck()

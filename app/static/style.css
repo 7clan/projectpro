@@ -10,3 +10,12 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 @media(max-width:530px){.step-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.step-tab{min-width:0;padding:10px 3px;font-size:10px}.step-tab b{overflow-wrap:anywhere}.nav-item{min-height:44px}.studio-controls button,.studio-controls select,.exam-input select{min-height:44px}.exam-input{flex-wrap:wrap}.reader-tools{flex-wrap:wrap}.reader-paper img{max-width:100%;height:auto}.studio-formula{overflow-wrap:anywhere}.topbar{padding-left:12px;padding-right:12px}}
 
 .skip-link{position:fixed;top:-100px;left:12px;z-index:100;padding:12px 16px;background:#fff;color:#24314b;border:2px solid #3066d8;border-radius:8px}.skip-link:focus{top:12px}.muted,.mini,.privacy-note,.chat-disclaimer,.bubble .source{color:#53637a}.auth-card p,.auth-card .auth-legal,.auth-divider{color:#53637a}.resource-card p{color:#53637a}.studio-steps button{min-height:22px}.studio-steps button:focus-visible{outline-offset:2px}
+
+/* Audit-driven contrast fixes; keep dark-on-light text readable. */
+.breadcrumb,.status-indicator,.stat-card>span,.stat-card small,.priority-topic p,.legend,.journey p,.page-heading p,.controls-grid label,.answer-fields label,.range-label,.step-tab,.step-tab span,.doc-card p,.empty,.reaction-values>div,.chat-top small,.profile-tip p{color:#53637a}
+.eyebrow,.blue-text,.chip-accent,.journey-icon,.task span:first-child,.resource-card .publisher{color:#5745ad}
+.hero-copy .eyebrow{color:#e0e6ff}
+.primary-btn{background:#5946c4}.primary-btn:hover{background:#4938b1}.hero-copy .primary-btn{background:#fff;color:#3548a0}
+.step-tab.active{color:#5745ad}.companion-card p,.formula-card p,.micro-panel p{color:#53637a}.verified{color:#176b4e}
+.alert-item,.alert-item p{color:#53637a}.chat-status{color:#146e54}
+@media(prefers-reduced-motion:reduce){.view{animation:none}.nav-item,.primary-btn,.secondary-btn{transition:none}}

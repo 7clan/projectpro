@@ -441,19 +441,19 @@ async def studio(payload:StudioRequest,user=Depends(user_from_token)):
 async def studio_audio(payload: dict, user=Depends(user_from_token)):
     import asyncio
     import json
-    from .voice import synthesize
+    from .voice import synthesize_preferred
     text=payload.get('text')
     lang=payload.get('lang','fr')
     cues=payload.get('cues',[])
     if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en') or not isinstance(cues,list) or len(cues)>32:
         raise HTTPException(422,'Invalid narration')
     try:
-        audio,marks=await asyncio.wait_for(synthesize(text,lang,cues),20)
+        audio,marks,backend=await asyncio.wait_for(synthesize_preferred(text,lang,cues),30)
     except (ValueError,TypeError):
         raise HTTPException(422,'Invalid narration or cue')
     except (FileNotFoundError,asyncio.TimeoutError):
-        raise HTTPException(503,'Local voice unavailable')
-    return Response(audio,media_type='audio/wav',headers={'Cache-Control':'no-store','X-Studio-Cues':json.dumps(marks,separators=(',',':'))})
+        raise HTTPException(503,'Neural voice unavailable')
+    return Response(audio,media_type='audio/wav',headers={'Cache-Control':'no-store','X-Studio-Voice':backend,'X-Studio-Cues':json.dumps(marks,separators=(',',':'))})
 
 class StudioReviewRequest(BaseModel):
     question: str = Field(min_length=3,max_length=800)

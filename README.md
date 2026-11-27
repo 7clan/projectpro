@@ -141,7 +141,7 @@ DÉCLIC is an independently developed competition prototype, not endorsed by the
 - **Classes:** create a classroom, share the one-time displayed join code, and view opted-in learner attempt/transfer counts from after enrolment. Students can revoke membership. No raw answers, PDFs, chats or email addresses are shared. Classroom ownership is self-service, not institutionally verified teacher identity.
 - **OCR:** install Tesseract with French and English language data (and add its executable to PATH). Upload automatically attempts up to 12 scan pages within a bounded time. Use OCR / Retry scan for an unindexed page; review OCR text before relying on it.
 - **Voice interruption:** click Interrupt or Micro to interrupt playback and cancel pending browser work. Optional speech auto-send submits recognized final text; recognition availability depends on the browser. This is turn-based conversation, not full-duplex streaming.
-- **Local AI:** optional Ollama on localhost. Set DECLIC_OLLAMA_MODEL to an installed model and DECLIC_LOCAL_ONLY=1 to avoid external LLM and speech calls. Model performance depends on hardware; browser speech recognition may still use a vendor service.
+- **Local AI:** optional Ollama on localhost. Set DECLIC_OLLAMA_MODEL to an installed model and DECLIC_LOCAL_ONLY=1 to avoid external LLM and speech calls. Model performance depends on hardware; local AI mode disables browser recognition and requires the optional Vosk models for microphone use.
 - **Docker:** see [private pilot deployment instructions](docs/DEPLOYMENT.md). No public hosting is claimed.
 
 ## Windows: use your installed Ollama
@@ -155,8 +155,28 @@ The GitHub Actions [Ollama acceptance workflow](.github/workflows/ollama-accepta
 
 The Quiz screen offers exact-source recall plus deterministic RDM2 conceptual MCQs with selectable difficulty and adaptation based on prior statics attempts. Classes support publishing and completing statics assignments, score reports and weekly practice trends. Teacher identity remains unverified unless explicitly approved by an operator after an external check. Assignment due dates are informational.
 
-Experimental voice interruption uses local microphone amplitude detection with echo cancellation, then invokes the browser speech recognizer. Use a headset, opt in and continue speaking after interruption. This is not full-duplex streaming, and the recognizer may use the browser vendor's service. Permission must be tested on real hardware.
+Experimental voice interruption uses local microphone amplitude detection with echo cancellation, then invokes the selected speech recognizer. In local mode it uses Vosk and never falls back to browser speech recognition. Use a headset, opt in and continue speaking after interruption. This is not full-duplex streaming, and the recognizer may use the browser vendor's service. Permission must be tested on real hardware.
 
 Small local Ollama models generate schema-constrained semantic plans (triangle, force and flow diagrams) rather than unrestricted SVG instructions. The application validates supported relationships and checks the diagram against recognized question types and explicit numeric parameters; no unrestricted academic guarantee is implied. For local-only operation install Piper separately and keep the external service consent off.
 
 For public hosting preparation and physical-device testing, see [deployment instructions](docs/DEPLOYMENT.md).
+
+
+## AI mode selector and streaming speech
+
+Studio, Coach and Quiz share a mode selector: Cloud (Gemini/OpenRouter/BazaarLink), Hybrid (cloud with Ollama fallback), or Local (Ollama). A server started with DECLIC_LOCAL_ONLY=1 locks all requests to local processing; use start-local.ps1 -Hybrid with locally configured keys to enable all choices. Cloud requests still require explicit consent; selecting local clears previous cloud consent. The Studio AI providers panel checks the loopback Ollama daemon and installed model without testing cloud quotas. See https://docs.ollama.com/api/tags.
+
+To enable French and English local speech recognition on Windows, from the repository folder after the Python environment exists:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-speech.txt
+New-Item -ItemType Directory -Force speech-models
+Invoke-WebRequest https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip -OutFile speech-models/fr.zip
+Expand-Archive speech-models/fr.zip -DestinationPath speech-models -Force
+Invoke-WebRequest https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip -OutFile speech-models/en.zip
+Expand-Archive speech-models/en.zip -DestinationPath speech-models -Force
+```
+
+Restart DÉCLIC and choose Vosk recognition in Studio. Vosk accepts streaming 16 kHz PCM via the authenticated same-origin WebSocket and returns partial and final transcripts. Audio is not stored. Local speech is processed on the **DÉCLIC server**, so it is on your own laptop only when you run the server there. Browser recognition remains optional in cloud/hybrid mode. Use headphones; automatic acoustic interruption is experimental, and true simultaneous model output streaming remains unimplemented. See [Vosk models and licenses](https://alphacephei.com/vosk/models). The real browser acceptance test used French synthetic microphone audio, not a physical device.
+
+The new AI Course MCQ option samples up to four indexed pages and returns up to six questions per request. It requires an exact supporting excerpt and a correct option appearing in that excerpt. Independent model review, when available, can reject the batch; otherwise it is labelled unreviewed. These checks do not prove conceptual correctness or full-course coverage. Source recall and deterministic RDM2 questions remain separate choices.

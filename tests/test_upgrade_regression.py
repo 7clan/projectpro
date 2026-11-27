@@ -45,6 +45,7 @@ def test_cloud_voice_requires_explicit_consent(client,auth,monkeypatch):
     assert received==[False,True]
 
 def test_voice_falls_back_when_cloud_fails(monkeypatch):
+    monkeypatch.setattr(voice,'_piper_installed',lambda name:False)
     monkeypatch.delenv('OPENROUTER_API_KEY',raising=False)
     monkeypatch.delenv('OPENROUTER',raising=False)
     monkeypatch.setattr(voice,'_cloud_retry_at',0)
@@ -107,6 +108,7 @@ def test_pythagorean_construction_has_outward_squares_and_exact_areas():
 
 
 def test_rate_limit_cooldown_avoids_repeated_cloud_requests(monkeypatch):
+    monkeypatch.setattr(voice,'_piper_installed',lambda name:False)
     monkeypatch.delenv('OPENROUTER_API_KEY',raising=False)
     monkeypatch.delenv('OPENROUTER',raising=False)
     calls=[]

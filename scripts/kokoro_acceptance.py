@@ -12,7 +12,7 @@ for _ in range(100):
         break
     except Exception:time.sleep(.3)
 else:raise RuntimeError("Server unavailable")
-cases=[("en",["kokoro-bella","kokoro-bella-smooth","kokoro-michael","kokoro-michael-smooth"])]
+cases=[("en",["kokoro-michael","kokoro-michael-smooth","pocket-alba","pocket-george"])]
 results=[]
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=False,ignore_default_args=["--mute-audio"],args=["--window-size=1440,900","--window-position=0,0","--start-maximized","--autoplay-policy=no-user-gesture-required"])

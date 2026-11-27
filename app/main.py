@@ -536,7 +536,13 @@ async def studio_audio(payload: dict, request:Request,user=Depends(user_from_tok
     if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en') or not isinstance(cues,list) or len(cues)>32:
         raise HTTPException(422,'Invalid narration')
     try:
-        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True and payload.get('ai_mode')!='local'),45))
+        engine=payload.get("voice_engine")
+        if engine=="kokoro":
+            from .kokoro_voice import synthesize_kokoro
+            task=synthesize_kokoro(text,lang,cues)
+        else:
+            task=synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True and payload.get('ai_mode')!='local')
+        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(task,45))
     except (ValueError,TypeError):
         raise HTTPException(422,'Invalid narration or cue')
     except (FileNotFoundError,asyncio.TimeoutError):

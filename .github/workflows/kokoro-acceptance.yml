@@ -1,0 +1,58 @@
+name: Offline Kokoro voice acceptance
+on:
+  push:
+    branches: [feature/kokoro-local-voice]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  voice:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt -r requirements-voice.txt -r requirements-kokoro.txt playwright
+      - name: Install pinned model files and Piper comparison voices
+        shell: bash
+        run: |
+          mkdir -p voices/kokoro kokoro-evidence
+          for name in kokoro-v1.0.onnx voices-v1.0.bin; do
+            curl -fL --retry 2 "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$name" -o "voices/kokoro/$name"
+          done
+          python -m piper.download_voices --data-dir voices en_US-lessac-medium fr_FR-siwis-medium
+          python -m pytest -q
+      - name: Windows real offline audio samples
+        if: runner.os == 'Windows'
+        shell: bash
+        run: KOKORO_SAMPLES_ONLY=1 PYTHONPATH=. python scripts/record_kokoro_voice.py
+      - name: Linux browser recording with actual audio
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth
+          python -m playwright install --with-deps chromium
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
+          export DECLIC_DB_PATH="$RUNNER_TEMP/kokoro.sqlite3"
+          export DECLIC_LOCAL_ONLY=1
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >kokoro-evidence/server.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep .5; done
+          xvfb-run -a -s "-screen 0 1440x900x24" env PYTHONPATH=. python scripts/record_kokoro_voice.py
+      - name: Verify non-silent MP4
+        if: runner.os == 'Linux' && always()
+        run: |
+          ffprobe -v error -show_entries stream=codec_type,duration -of json kokoro-evidence/DECLIC-kokoro-local-studio.mp4
+          ffmpeg -hide_banner -i kokoro-evidence/DECLIC-kokoro-local-studio.mp4 -vn -af volumedetect -f null - 2>&1 | tee kokoro-evidence/volume.txt
+          python -c "import re,pathlib; p=re.search(r'max_volume: (-?[0-9.]+) dB',pathlib.Path('kokoro-evidence/volume.txt').read_text()); assert p and float(p[1]) > -40"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-Kokoro-${{ runner.os }}
+          path: kokoro-evidence/

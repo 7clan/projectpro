@@ -140,7 +140,7 @@ function applyAiMode(mode){
  const consent=$('studio-consent'),voice=$('studio-voice-engine');
  consent.checked=false;consent.disabled=state.localOnly;
  $('quiz-consent').checked=false;$('quiz-consent').disabled=state.localOnly;
- if(state.localOnly)voice.value='local';voice.disabled=state.localOnly;
+ if(state.localOnly&&voice.value==='cloud')voice.value='local';voice.querySelector('option[value=cloud]').disabled=state.localOnly;voice.disabled=false;
  const recognition=$('studio-speech-engine');recognition.options[0].disabled=state.localOnly;recognition.options[1].disabled=!state.speech?.fr&&!state.speech?.en;recognition.value=state.localOnly?'vosk':recognition.options[1].disabled?'browser':recognition.value;recognition.disabled=state.localOnly||recognition.options[1].disabled;
  window.dispatchEvent(new CustomEvent('declic:ai-mode',{detail:mode}));
 }

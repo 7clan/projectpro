@@ -507,16 +507,21 @@ async def studio(payload:StudioRequest,request:Request,user=Depends(user_from_to
         raise HTTPException(409,'Termine ton essai indépendant avant de demander une leçon liée à cet exercice.' if payload.lang=='fr' else 'Finish your independent attempt before requesting a lesson linked to this exercise.')
     b=beam_for(row) if row else Beam()
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
-    sources=search_sources(pages,payload.question)
-    history=[x.model_dump() for x in payload.history]
+    from .studio_context import resolve_turn,needs_fresh_data,unavailable_fresh,short_pythagoras
+    question,history=resolve_turn(payload.question,[x.model_dump() for x in payload.history])
+    if needs_fresh_data(question):return unavailable_fresh(payload.lang)
+    sources=search_sources(pages,question)
     with use_mode(payload.ai_mode,payload.consent_external) as effective:
         enabled=effective!="disabled" and ai_status()["enabled"]
         if payload.generative and enabled:
             from .whiteboard import generate
-            result=await until_disconnect(request,generate(payload.question,payload.lang,sources,history))
+            result=await until_disconnect(request,generate(question,payload.lang,sources,history))
             if result is not None:
                 return result
-        result=await until_disconnect(request,teach(payload.question,b,payload.lang,sources,history,enabled))
+        if payload.generative:
+            known=short_pythagoras(question,payload.lang,sources)
+            if known is not None:return known
+        result=await until_disconnect(request,teach(question,b,payload.lang,sources,history,enabled))
         result['visual_mode']='predefined'
         if payload.generative:
             result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'

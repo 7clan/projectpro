@@ -1,0 +1,107 @@
+"""Browser acceptance for new course tools and interrupt controls.
+Uses actual local API; synthetic speech-recognition events only for mic wiring.
+"""
+import json
+from pathlib import Path
+from playwright.sync_api import sync_playwright,expect
+OUT=Path("expansion-evidence");OUT.mkdir(exist_ok=True)
+checks=[]
+def check(page,name):
+    page.screenshot(path=str(OUT/(name+".png")),full_page=True)
+    checks.append(name)
+    print("PASS",name,flush=True)
+with sync_playwright() as p:
+    browser=p.chromium.launch()
+    teacher=browser.new_context(viewport={"width":1440,"height":900},record_video_dir=str(OUT/"video"))
+    page=teacher.new_page()
+    errors=[]
+    page.on("pageerror",lambda e:errors.append(str(e)))
+    page.on("dialog",lambda d:d.accept())
+    page.goto("http://127.0.0.1:8000")
+    page.locator("#demo-login").click()
+    expect(page.locator("#auth-overlay")).to_be_hidden()
+    page.wait_for_function("state.challenge!==null && !state.labBusy")
+    page.locator('[data-view="library"]').click()
+    page.locator("#course-file").set_input_files("data/demo_rdm2.pdf")
+    with page.expect_response(lambda r:r.url.endswith("/api/documents") and r.request.method=="POST") as event:
+        page.locator("#upload-form button").click()
+    assert event.value.status==201
+    page.wait_for_function("state.reader && !state.readerLoading")
+    check(page,"01-course-upload")
+    page.locator('[data-view="quiz"]').click()
+    expect(page.locator("#quiz-document option")).to_have_count(2)
+    page.locator("#quiz-start").click()
+    expect(page.locator("#quiz-form")).to_be_visible()
+    questions=page.locator("#quiz-questions input")
+    assert questions.count()>0
+    for i in range(questions.count()):questions.nth(i).fill("test answer")
+    check(page,"02-generated-quiz")
+    page.locator("#quiz-form button").click()
+    expect(page.locator("#quiz-results h3")).to_be_visible()
+    check(page,"03-quiz-feedback")
+    page.locator("#quiz-results button").first.click()
+    page.wait_for_function("state.currentView==='library' && state.reader && !state.readerLoading")
+    check(page,"04-quiz-source-navigation")
+    page.locator('[data-view="classroom"]').click()
+    page.locator("#class-name").fill("RDM demonstration")
+    with page.expect_response(lambda r:r.url.endswith("/api/classrooms") and r.request.method=="POST") as event:
+        page.locator("#class-create button").click()
+    c=event.value.json()
+    expect(page.locator("#class-code")).to_contain_text(c["join_code"])
+    check(page,"05-teacher-class-created")
+    learner=browser.new_context(viewport={"width":390,"height":844},is_mobile=True,has_touch=True)
+    m=learner.new_page()
+    m.on("pageerror",lambda e:errors.append(str(e)))
+    m.goto("http://127.0.0.1:8000")
+    m.locator("#demo-login").click()
+    expect(m.locator("#auth-overlay")).to_be_hidden()
+    m.wait_for_function("state.challenge!==null && !state.labBusy")
+    m.locator('[data-view="classroom"]').click()
+    m.locator("#class-join-code").fill(c["join_code"])
+    m.locator("#class-consent").check()
+    m.locator("#class-join button").click()
+    expect(m.locator("#class-list")).to_contain_text("RDM demonstration")
+    check(m,"06-mobile-learner-consent")
+    m.locator('[data-view="lab"]').click()
+    m.locator('[data-pred="left"]').click()
+    expect(m.locator("#step-solve")).to_be_visible()
+    page.locator("#class-list button").filter(has_text="Résultats").first.click()
+    expect(page.locator("#class-report")).to_contain_text("1 essais")
+    check(page,"07-teacher-report")
+    m.locator('[data-view="classroom"]').click()
+    m.locator("#class-list button").filter(has_text="Quitter").click()
+    expect(m.locator("#class-list")).not_to_contain_text("RDM demonstration")
+    page.locator("#class-list button").filter(has_text="Résultats").first.click()
+    expect(page.locator("#class-report")).to_contain_text("Aucun participant")
+    check(page,"08-consent-revoked")
+    m.locator('[data-view="quiz"]').click()
+    assert m.evaluate("document.documentElement.scrollWidth<=innerWidth+2")
+    check(m,"09-mobile-quiz-layout")
+    page.locator('[data-view="studio"]').click()
+    page.locator("#studio-voice").uncheck()
+    # Real local lesson starts playback. Interrupt it immediately.
+    page.locator("#studio-question").fill("Explique le moment et la poutre")
+    page.locator("#studio-send").click()
+    expect(page.locator("#studio-play")).to_contain_text("Stop")
+    page.locator("#studio-interrupt").click()
+    expect(page.locator("#studio-play")).to_contain_text("Play")
+    expect(page.locator("#studio-status")).to_contain_text("Interrompu")
+    check(page,"10-interrupt-active-lesson")
+    # Simulated recognition event verifies automatic submission, not microphone hardware.
+    page.evaluate("""() => {
+      window.SpeechRecognition=class {
+        start(){this.onstart?.();this.onresult?.({results:[Object.assign([{transcript:'Explique les moments de la poutre'}],{isFinal:true})]});this.onend?.()}
+        stop(){this.onend?.()}
+        abort(){this.onend?.()}
+      }
+    }""")
+    page.locator("#studio-auto-send").check()
+    with page.expect_response(lambda r:r.url.endswith("/api/studio") and r.request.method=="POST") as event:
+        page.locator("#studio-mic").click()
+    assert event.value.status==200
+    check(page,"11-simulated-mic-auto-submit")
+    assert not errors,errors
+    learner.close()
+    teacher.close()
+    browser.close()
+(OUT/"results.json").write_text(json.dumps({"checks":checks,"browser_errors":errors,"microphone":"synthetic recognition event, not hardware"},indent=2))

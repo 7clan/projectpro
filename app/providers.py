@@ -21,7 +21,7 @@ def _limit(provider,model,response):
     try:delay=float(response.headers.get("Retry-After","60"))
     except ValueError:delay=60
     if not math.isfinite(delay):delay=60
-    scope="*" if status in (401,403) else model
+    scope="*" if status in (401,403) or (provider=="bazaarlink" and status==429) else model
     # A 402 can reflect the requested token budget for an individual model.
     # Do not disable every model for that response.
     seconds=300 if status in (401,403) else max(15,min(600,delay))
@@ -56,7 +56,12 @@ async def candidates(client):
             free=[]
         for n in dict.fromkeys(explicit+free[:5]+["openrouter/free"]):
             result.append(("openrouter",n,key))
-    return sorted(result,key=lambda o:o[0]!='openrouter')[:10]
+    key=os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME")
+    if key:
+        # Current documented free models, with the provider's guaranteed free router as fallback.
+        for model in ("qwen/qwen3.7-flash","deepseek/deepseek-v4-flash-0731free","nvidia/nemotron-3.5-lightning-free","auto:free"):
+            result.append(("bazaarlink",model,key))
+    return result
 
 async def complete(client,provider,model,key,prompt,budget=3000):
     if provider=="gemini":
@@ -66,6 +71,14 @@ async def complete(client,provider,model,key,prompt,budget=3000):
         log.info("Gemini model %s finish=%s",model,[c.get("finishReason") for c in d.get("candidates",[])])
         text=" ".join(p.get("text","") for c in d.get("candidates",[]) for p in c.get("content",{}).get("parts",[]) if not p.get("thought"))
         return text
+    if provider=="bazaarlink":
+        r=await client.post("https://api.bazaarlink.ai/v1/chat/completions",
+            headers={"Authorization":"Bearer "+key,"X-Free-Fallback":"false"},
+            json={"model":model,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":budget})
+        r.raise_for_status()
+        d=r.json()
+        return d["choices"][0]["message"].get("content") or ""
+    if provider!="openrouter":raise ValueError("Unknown provider")
     r=await client.post("https://openrouter.ai/api/v1/chat/completions",headers={"Authorization":"Bearer "+key,"X-Title":"Declic whiteboard"},json={"model":model,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":budget})
     r.raise_for_status()
     d=r.json(); c=d["choices"][0]
@@ -75,18 +88,24 @@ async def complete(client,provider,model,key,prompt,budget=3000):
 async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
     async with httpx.AsyncClient(timeout=12) as client:
         options=[o for o in await candidates(client) if o[1]!=exclude_model]
-        # Prefer the router for text tasks; avoid parallel speculative requests.
-        # With both providers configured, reviews never consume Gemini voice capacity.
-        router=[o for o in options if o[0]=="openrouter"]
-        gemini=[o for o in options if o[0]=="gemini"]
-        reserve=bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"))
+        router=[o for o in options if o[0]=="openrouter" and _ready(o[0],o[1])]
+        bazaar=[o for o in options if o[0]=="bazaarlink" and _ready(o[0],o[1])]
+        gemini=[o for o in options if o[0]=="gemini" and _ready(o[0],o[1])]
+        reserve=bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER") or os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"))
         if reserve and (role=="review" or os.getenv("DECLIC_GEMINI_TEXT_FALLBACK","1")=="0"):
             gemini=[]
-        # Limit failed trials on one service, leaving time for a useful fallback.
-        if router and gemini:
-            options=router[:2]+gemini[:2]
-        else:
-            options=(router or gemini)[:3]
+        # Different accounts share no local cooldown. Avoid redundant parallel calls.
+        # Prefer BazaarLink for original visual lessons, OpenRouter for short coaching.
+        if role=="review":
+            bazaar=sorted(bazaar,key=lambda o:"deepseek" not in o[1])
+        first,second=(bazaar,router) if role in ("lesson","review") else (router,bazaar)
+        options=[]
+        if first:options.append(first[0])
+        if second:options.append(second[0])
+        if len(first)>1:options.append(first[1])
+        if len(second)>1:options.append(second[1])
+        options.extend(gemini[:2])
+        if not first and not second:options=gemini[:3]
         for provider,model,key in options[:max_candidates]:
             if not _ready(provider,model):continue
             try:

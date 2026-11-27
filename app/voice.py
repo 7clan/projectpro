@@ -75,7 +75,48 @@ from functools import lru_cache
 _VOICE_LOCK=threading.Lock()
 _VOICE_NAMES={"fr":"fr_FR-siwis-medium","en":"en_US-lessac-medium"}
 _EXTRA_VOICES={"en_US-amy-medium":"en","en_US-ryan-medium":"en","en_GB-alba-medium":"en","fr_FR-tom-medium":"fr"}
-_KOKORO_VOICES={"kokoro-heart":"af_heart","kokoro-bella":"af_bella","kokoro-michael":"am_michael","kokoro-bella-smooth":"af_bella","kokoro-michael-smooth":"am_michael"}
+_KOKORO_VOICES={"kokoro-michael":"am_michael","kokoro-michael-smooth":"am_michael"}
+_POCKET_VOICES={"pocket-alba":"alba","pocket-george":"george"}
+def _pocket_executable():
+    directory=Path(__file__).resolve().parents[1]/"voices"/"pocket"
+    candidate=directory/("pocket-tts.exe" if os.name=="nt" else "pocket-tts")
+    return str(candidate) if candidate.is_file() else None
+
+def _pocket_render(text,lang,cues,voice_name):
+    """Optional local standalone engine, no API credentials or custom references."""
+    import subprocess
+    import tempfile
+    import numpy as np
+    executable=_pocket_executable()
+    if not executable:raise FileNotFoundError("Pocket TTS executable not installed")
+    # One or two longer phrases retain prosody. Group boundaries are aligned
+    # to actual frames; coalesced reveal cues share the phrase start.
+    chunks=split_cues(text,cues)
+    while len(chunks)>1 and (len(chunks)>2 or any(len(x[0].split())<7 for x in chunks)):
+        i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
+        a,aa=chunks[i];b,bb=chunks[i+1]
+        chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
+    env={k:v for k,v in os.environ.items() if not any(x in k.upper() for x in ("KEY","TOKEN","SECRET","PASSWORD","GEMEINI","OPENROUTER","BAZAARLINK","SOME"))}
+    env.update({"RAYON_NUM_THREADS":"2","OMP_NUM_THREADS":"2","MKL_NUM_THREADS":"2","HF_HUB_DISABLE_TELEMETRY":"1"})
+    output=io.BytesIO();marks=[];offset=0
+    with _VOICE_LOCK,tempfile.TemporaryDirectory() as folder,wave.open(output,"wb") as w:
+        w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
+        for i,(fragment,positions) in enumerate(chunks):
+            path=Path(folder)/f"phrase-{i}.wav"
+            try:
+                subprocess.run([executable,"generate","--language","english_2026-10","--voice",_POCKET_VOICES[voice_name],"--text="+fragment,"--output-path",str(path),"--sampler-decode-steps","3"],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=18,check=True)
+            except (subprocess.SubprocessError,OSError) as exc:
+                logging.getLogger(__name__).warning("Pocket synthesis failed: %s",type(exc).__name__)
+                raise FileNotFoundError("Pocket voice unavailable") from exc
+            with wave.open(str(path),"rb") as src:
+                if (src.getnchannels(),src.getsampwidth(),src.getframerate())!=(1,2,24000):raise ValueError("Unexpected Pocket audio format")
+                raw=src.readframes(src.getnframes())
+            samples=np.frombuffer(raw,dtype="<i2")
+            if len(samples)<2400 or not np.any(np.abs(samples.astype(np.int32))>100):raise ValueError("Empty Pocket audio")
+            marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
+            w.writeframes(raw);offset+=len(samples)
+    return output.getvalue(),marks
+
 def _kokoro_paths():
     directory=Path(os.getenv("DECLIC_KOKORO_DIR",str(Path(__file__).resolve().parents[1]/"voices"/"kokoro")))
     return directory/"kokoro-v1.0.onnx",directory/"voices-v1.0.bin"
@@ -151,7 +192,7 @@ def _kokoro_render(text,lang,cues,voice_name):
 
 def voice_choices():
     directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
-    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]+[{"id":name,"lang":"en","installed":_kokoro_available()} for name in _KOKORO_VOICES]
+    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]+[{"id":name,"lang":"en","installed":_kokoro_available()} for name in _KOKORO_VOICES]+[{"id":name,"lang":"en","installed":_pocket_executable() is not None} for name in _POCKET_VOICES]
 
 
 @lru_cache(maxsize=2)
@@ -201,6 +242,10 @@ async def synthesize_preferred(text,lang,cues,cloud=False,voice_name=None):
     cloud=cloud and os.getenv('DECLIC_LOCAL_ONLY')!='1'
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
+    if isinstance(voice_name,str) and voice_name in _POCKET_VOICES:
+        if lang!="en":raise ValueError("Unsupported voice for lesson language")
+        audio,marks=await asyncio.to_thread(_pocket_render,text,lang,cues,voice_name)
+        return audio,marks,voice_name
     if isinstance(voice_name,str) and voice_name in _KOKORO_VOICES:
         if lang!="en":raise ValueError("Unsupported voice for lesson language")
         try:

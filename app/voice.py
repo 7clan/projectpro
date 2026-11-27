@@ -107,9 +107,15 @@ def _neural_render(text,lang,cues):
         w.writeframes(b"".join(frames))
     return out.getvalue(),marks
 
-async def synthesize_preferred(text,lang,cues):
+async def synthesize_preferred(text,lang,cues,cloud=False):
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
+    if cloud:
+        try:
+            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),24)
+            return audio,marks,'gemini-neural'
+        except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError):
+            pass
     try:
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
         return audio,marks,"piper-neural"
@@ -118,3 +124,56 @@ async def synthesize_preferred(text,lang,cues):
             audio,marks=await synthesize(text,lang,cues)
             return audio,marks,"espeak-fallback"
         raise FileNotFoundError("Neural voice unavailable; use browser speech") from None
+
+async def _gemini_render(text,lang,cues):
+    """Synthesize cue-aligned phrases; never send narration without explicit opt-in."""
+    import base64
+    import httpx
+    key=os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI")
+    if not key: raise FileNotFoundError("Gemini speech key unavailable")
+    model=os.getenv("GEMINI_TTS_MODEL","gemini-3.8-flash-lite-tts")
+    if not re.fullmatch(r"gemini-[a-zA-Z0-9.-]+-tts",model): raise ValueError("Invalid TTS model")
+    chunks=split_cues(text,cues)
+    # Bound cost and latency. More complex scenes retain exact local timing.
+    if len(chunks)>4: raise ValueError("Too many cloud speech phrases")
+    async with httpx.AsyncClient(timeout=18) as client:
+        semaphore=asyncio.Semaphore(2)
+        async def phrase(fragment,positions):
+            language="French" if lang=="fr" else "English"
+            prompt=f"Read only the following {language} passage verbatim, warmly and naturally, as a patient teacher. Do not add words or read the instruction.\n\n"+fragment
+            async with semaphore:
+                try:
+                    r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}}})
+                    r.raise_for_status()
+                except httpx.HTTPError as e:
+                    raise RuntimeError("Cloud speech unavailable") from e
+            parts=[p["inlineData"] for c in r.json().get("candidates",[]) for p in c.get("content",{}).get("parts",[]) if "inlineData" in p]
+            if len(parts)!=1: raise ValueError("Missing or ambiguous audio")
+            raw=base64.b64decode(parts[0]["data"],validate=True)
+            if len(raw)>3_000_000: raise ValueError("Audio too large")
+            mime=parts[0].get("mimeType","").lower()
+            if raw.startswith(b"RIFF"):
+                with wave.open(io.BytesIO(raw),"rb") as w:
+                    if (w.getnchannels(),w.getsampwidth(),w.getframerate())!=(1,2,24000): raise ValueError("Unexpected voice format")
+                    raw=w.readframes(w.getnframes())
+            elif "l16" not in mime and "pcm" not in mime: raise ValueError("Unexpected audio type")
+            rate=re.search(r"rate=(\d+)",mime)
+            if rate and int(rate.group(1))!=24000: raise ValueError("Unexpected sample rate")
+            if len(raw)<2400 or len(raw)%2: raise ValueError("Empty or malformed audio")
+            return raw,positions
+        tasks=[asyncio.create_task(phrase(fragment,positions)) for fragment,positions in chunks]
+        try:
+            parts=await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done(): task.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)
+    output=io.BytesIO()
+    offset=0
+    marks=[]
+    with wave.open(output,"wb") as w:
+        w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
+        for raw,positions in parts:
+            marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
+            w.writeframes(raw);offset+=len(raw)//2
+    return output.getvalue(),marks

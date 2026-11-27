@@ -1,0 +1,33 @@
+name: Full learner browser regression
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/quality-journey.yml']
+permissions:
+  contents: read
+jobs:
+  learner-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt playwright
+      - run: python -m pytest -q && node --check app/static/app.js && node --check app/static/studio.js
+      - run: python -m playwright install --with-deps chromium
+      - name: Record and verify learner journey
+        run: |
+          mkdir -p quality-evidence
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >quality-evidence/server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8000/api/health; then break; fi
+            sleep 0.5
+          done
+          python scripts/quality_journey.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-quality-evidence
+          path: quality-evidence/

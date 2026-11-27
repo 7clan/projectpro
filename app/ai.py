@@ -4,7 +4,8 @@ import re
 
 
 def ai_status():
-    local=os.getenv('DECLIC_OLLAMA_MODEL','').strip()
+    from .providers import local_model
+    local=local_model()
     if os.getenv('DECLIC_LOCAL_ONLY')=='1':return {'enabled':bool(local),'provider':'ollama' if local else 'guided','model':local or None}
     if os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"):
         return {"enabled":True,"provider":"openrouter","model":os.getenv("OPENROUTER_MODEL","openrouter/free")}

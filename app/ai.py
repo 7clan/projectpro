@@ -6,6 +6,8 @@ import re
 def ai_status():
     if os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"):
         return {"enabled":True,"provider":"openrouter","model":os.getenv("OPENROUTER_MODEL","openrouter/free")}
+    if os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"):
+        return {"enabled":True,"provider":"bazaarlink","model":"qwen/qwen3.7-flash"}
     if os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI"):
         return {"enabled":True,"provider":"gemini","model":os.getenv("GEMINI_MODEL","gemini-flash-lite-latest")}
     return {"enabled":False,"provider":"guided","model":None}

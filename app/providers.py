@@ -167,7 +167,28 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
 
 async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
     try:
-        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if local_model() else 50)
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if local_model() and mode()!='cloud' else 50)
     except asyncio.TimeoutError:
         log.warning("Provider routing deadline exceeded role=%s",role)
         return None
+
+
+async def provider_status():
+    """Configuration is not proof of cloud availability; probe only local daemon."""
+    modes=configured_modes()
+    model=local_model()
+    local={"configured":bool(model),"model":model or None,"reachable":False,"installed":False}
+    if model:
+        try:
+            async with httpx.AsyncClient(timeout=3,trust_env=False) as client:
+                response=await client.get("http://127.0.0.1:11434/api/tags")
+                response.raise_for_status()
+                local["reachable"]=True
+                tags=response.json().get("models",[])
+                names={model,model+":latest"} if ":" not in model else {model}
+                local["installed"]=any(t.get("name") in names and not t.get("remote_model") and not t.get("remote_host") for t in tags if isinstance(t,dict))
+        except (httpx.HTTPError,ValueError,TypeError,AttributeError):pass
+    return {"modes":modes,"providers":{"ollama":local,
+        "gemini":{"configured":bool(os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI"))},
+        "openrouter":{"configured":bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"))},
+        "bazaarlink":{"configured":bool(os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"))}}}

@@ -248,12 +248,42 @@ def create_challenge(payload: ChallengeRequest, user=Depends(user_from_token)):
         b=Beam(length,load,position,udl)
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from None
+    if payload.kind=='transfer' and one('SELECT id FROM challenges WHERE user_id=? AND length=? AND load=? AND position=? AND udl=?',(user['id'],b.length,b.load,b.position,b.udl)):
+        if any(v is not None for v in (payload.length,payload.load,payload.position,payload.udl)):
+            raise HTTPException(409,'Choisis une configuration réellement inédite')
+        for _ in range(80):
+            length=float(random.choice([6,8,10,12,14,16,18,20]))
+            load=float(random.choice([8,12,16,20,24,28,32]))
+            position=round(length*random.choice([.2,.25,.35,.45,.6,.7,.75,.8]),2)
+            udl=float(random.choice([0,2,4,6]))
+            b=Beam(length,load,position,udl)
+            if not one('SELECT id FROM challenges WHERE user_id=? AND length=? AND load=? AND position=? AND udl=?',(user['id'],length,load,position,udl)):
+                break
+        else:
+            raise HTTPException(409,'Impossible de générer un cas inédit')
     if not b.validate_equilibrium():
         raise HTTPException(500,'Échec de vérification statique')
     cid=uuid.uuid4().hex
     with db() as con:
         con.execute('INSERT INTO challenges(id,user_id,kind,length,load,position,udl,created_at) VALUES(?,?,?,?,?,?,?,?)',(cid,user['id'],payload.kind,length,load,position,udl,now()))
     return {'challenge':{'id':cid,'kind':payload.kind,'length':length,'load':load,'position':position,'udl':udl},'stage':'predict'}
+
+
+@app.get('/api/challenges/current')
+def current_challenge(user=Depends(user_from_token)):
+    row=one('SELECT * FROM challenges WHERE user_id=? ORDER BY created_at DESC LIMIT 1',(user['id'],))
+    if not row:
+        return {'challenge':None,'attempts':[]}
+    attempts=all_rows('SELECT stage,concept,correct,misconception,input,created_at FROM attempts WHERE user_id=? AND challenge_id=? ORDER BY created_at',(user['id'],row['id']))
+    result={'challenge':basic_challenge(row),'attempts':attempts}
+    solved=next((a for a in attempts if a['stage'] in ('practice','transfer')),None)
+    if solved:
+        b=beam_for(row)
+        result['solution']=b.overview()
+        result['expected']={'ra':round(b.ra,3),'rb':round(b.rb,3)}
+        result['feedback_fr']=MISTAKES_FR.get(solved['misconception'],'Les deux équations d’équilibre sont vérifiées.')
+        result['feedback_en']=MISTAKES_EN.get(solved['misconception'],'Both equilibrium equations are satisfied.')
+    return result
 
 
 @app.get('/api/challenges/{challenge_id}')
@@ -273,7 +303,7 @@ def predict(challenge_id: str,payload: Prediction,user=Depends(user_from_token))
     saved=record_attempt(user['id'],challenge_id,'prediction','support_reactions',correct,misconception,payload.answer)
     if not saved:
         raise HTTPException(409,'Prévision déjà enregistrée')
-    return {'correct':correct,'expected':expected,'feedback':'Prédiction correcte : passe aux équations.' if correct else 'Observe le côté le plus proche de la charge : sa réaction est généralement plus élevée.'}
+    return {'correct':correct,'expected':expected,'feedback':'Prédiction correcte : passe aux équations.' if correct else 'Observe le côté le plus proche de la charge : sa réaction est généralement plus élevée.','feedback_en':'Correct prediction. Proceed to the equations.' if correct else 'Observe which support is closer to the point load.'}
 
 
 @app.post('/api/challenges/{challenge_id}/submit')
@@ -292,7 +322,7 @@ def submit(challenge_id: str,payload: Submission,user=Depends(user_from_token)):
     if not saved:
         raise HTTPException(409,'Tentative déjà enregistrée ; crée un nouvel exercice')
     explanation = MISTAKES_FR.get(verdict['misconception'],'Très bien : les deux équations d’équilibre sont vérifiées.')
-    return {**verdict,'expected':{'ra':round(b.ra,3),'rb':round(b.rb,3)},'explanation':explanation,'solution':b.overview(), 'profile':profile(user['id'],user['exam_date'])}
+    return {**verdict,'expected':{'ra':round(b.ra,3),'rb':round(b.rb,3)},'explanation':explanation,'explanation_en':MISTAKES_EN.get(verdict['misconception'],'Well done: both equilibrium equations are satisfied.'),'solution':b.overview(), 'profile':profile(user['id'],user['exam_date'])}
 
 
 @app.post('/api/challenges/{challenge_id}/explain')
@@ -408,6 +438,8 @@ async def tutor(payload:CoachRequest,user=Depends(user_from_token)):
     else:
         b=Beam()
         attempted=False
+    if payload.challenge_id and row['kind']=='transfer' and not attempted:
+        return {'mode':'guided_offline','answer':'Termine ton essai indépendant avant de demander une aide liée à cet exercice.' if payload.lang=='fr' else 'Finish your independent attempt before requesting help with this exercise.','sources':[],'notice':'Évaluation indépendante' if payload.lang=='fr' else 'Independent assessment'}
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
     if ai_status()["enabled"] and not payload.consent_external:
@@ -432,7 +464,10 @@ class StudioRequest(BaseModel):
 @app.post('/api/studio')
 async def studio(payload:StudioRequest,user=Depends(user_from_token)):
     from .studio import teach
-    b=beam_for(owned_challenge(payload.challenge_id,user['id'])) if payload.challenge_id else Beam()
+    row=owned_challenge(payload.challenge_id,user['id']) if payload.challenge_id else None
+    if row and row['kind']=='transfer' and not one("SELECT id FROM attempts WHERE user_id=? AND challenge_id=? AND stage='transfer'",(user['id'],row['id'])):
+        raise HTTPException(409,'Termine ton essai indépendant avant de demander une leçon liée à cet exercice.' if payload.lang=='fr' else 'Finish your independent attempt before requesting a lesson linked to this exercise.')
+    b=beam_for(row) if row else Beam()
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
     history=[x.model_dump() for x in payload.history]

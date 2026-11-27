@@ -493,7 +493,7 @@ async def studio_audio(payload: dict, user=Depends(user_from_token)):
     if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en') or not isinstance(cues,list) or len(cues)>32:
         raise HTTPException(422,'Invalid narration')
     try:
-        audio,marks,backend=await asyncio.wait_for(synthesize_preferred(text,lang,cues),30)
+        audio,marks,backend=await asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True),45)
     except (ValueError,TypeError):
         raise HTTPException(422,'Invalid narration or cue')
     except (FileNotFoundError,asyncio.TimeoutError):

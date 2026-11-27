@@ -122,3 +122,19 @@ def test_disconnect_cancels_pending_work():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(until_disconnect(Request(),work()))
     assert exc.value.status_code==499 and cancelled==[True]
+
+
+def test_local_only_studio_without_cloud_consent(client,auth,monkeypatch):
+    from app import whiteboard
+    monkeypatch.setenv("DECLIC_LOCAL_ONLY","1")
+    monkeypatch.setenv("DECLIC_OLLAMA_MODEL","test-local")
+    async def generate(*args):return {"provider":"ollama","model":"test-local","visual_mode":"generated","mode":"live_ai"}
+    monkeypatch.setattr(whiteboard,"generate",generate)
+    assert client.get("/api/health").json()["ai"]["local_only"]
+    r=client.post("/api/studio",headers=auth,json={"question":"Explain geometry","generative":True,"consent_external":False})
+    assert r.status_code==200 and r.json()["provider"]=="ollama"
+
+def test_local_mode_rejects_cloud_model(monkeypatch):
+    monkeypatch.setenv("DECLIC_LOCAL_ONLY","1")
+    monkeypatch.setenv("DECLIC_OLLAMA_MODEL","example:cloud")
+    assert asyncio.run(providers.candidates(None))==[]

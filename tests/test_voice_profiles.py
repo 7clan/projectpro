@@ -18,3 +18,15 @@ def test_selected_voice_is_explicit_and_local(monkeypatch):
     for invalid in ("../other","fr_FR-tom-medium",42):
         with pytest.raises(ValueError):
             asyncio.run(voice.synthesize_preferred("Hello","en",[0],voice_name=invalid))
+
+
+def test_kokoro_is_explicit_and_english_only(monkeypatch):
+    calls=[]
+    def render(text,lang,cues,voice_name):
+        calls.append(voice_name)
+        return b"audio",[{"at":0,"time":0}]
+    monkeypatch.setattr(voice,"_kokoro_render",render)
+    _,_,backend=asyncio.run(voice.synthesize_preferred("Hello","en",[0],cloud=True,voice_name="kokoro-heart"))
+    assert backend=="kokoro-heart" and calls==["kokoro-heart"]
+    with pytest.raises(ValueError):
+        asyncio.run(voice.synthesize_preferred("Bonjour","fr",[0],voice_name="kokoro-heart"))

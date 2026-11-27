@@ -2,9 +2,30 @@
 import os
 import asyncio
 import logging
+import time
+import math
 import httpx
 
 log=logging.getLogger(__name__)
+
+# In-memory process-wide rate-limit state; never store or log secret values.
+_cooldowns={}
+
+def _ready(provider,model):
+    now=time.monotonic()
+    return max(_cooldowns.get((provider,"*"),0),_cooldowns.get((provider,model),0))<=now
+
+def _limit(provider,model,response):
+    status=response.status_code
+    if status not in (401,402,403,429):return
+    try:delay=float(response.headers.get("Retry-After","60"))
+    except ValueError:delay=60
+    if not math.isfinite(delay):delay=60
+    scope="*" if status in (401,403) else model
+    # A 402 can reflect the requested token budget for an individual model.
+    # Do not disable every model for that response.
+    seconds=300 if status in (401,403) else max(15,min(600,delay))
+    _cooldowns[(provider,scope)]=time.monotonic()+seconds
 
 async def candidates(client):
     result=[]
@@ -35,7 +56,7 @@ async def candidates(client):
             free=[]
         for n in dict.fromkeys(explicit+free[:5]+["openrouter/free"]):
             result.append(("openrouter",n,key))
-    return result[:10]
+    return sorted(result,key=lambda o:o[0]!='openrouter')[:10]
 
 async def complete(client,provider,model,key,prompt,budget=3000):
     if provider=="gemini":
@@ -51,35 +72,37 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     log.info("Model %s finish=%s content_length=%s",d.get("model",model),c.get("finish_reason"),len(c["message"].get("content") or ""))
     return c["message"].get("content") or ""
 
-async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10):
-    async with httpx.AsyncClient(timeout=15) as client:
-        options=[o for o in await candidates(client) if o[1]!=exclude_model][:max_candidates]
-        # Two independent providers/models at most in flight. Never forward keys to unrelated hosts.
-        async def try_one(option):
-            provider,model,key=option
+async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
+    async with httpx.AsyncClient(timeout=12) as client:
+        options=[o for o in await candidates(client) if o[1]!=exclude_model]
+        # Prefer the router for text tasks; avoid parallel speculative requests.
+        # With both providers configured, reviews never consume Gemini voice capacity.
+        router=[o for o in options if o[0]=="openrouter"]
+        gemini=[o for o in options if o[0]=="gemini"]
+        reserve=bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"))
+        if reserve and (role=="review" or os.getenv("DECLIC_GEMINI_TEXT_FALLBACK","1")=="0"):
+            gemini=[]
+        # Limit failed trials on one service, leaving time for a useful fallback.
+        if router and gemini:
+            options=router[:2]+gemini[:2]
+        else:
+            options=(router or gemini)[:3]
+        for provider,model,key in options[:max_candidates]:
+            if not _ready(provider,model):continue
             try:
                 raw=await complete(client,provider,model,key,prompt,budget)
-                return validator(raw),provider,model
+                value=validator(raw)
+                log.info("AI route success role=%s provider=%s model=%s",role,provider,model)
+                return value,provider,model
             except (httpx.HTTPError,ValueError,KeyError,TypeError,IndexError,AttributeError) as e:
                 status=e.response.status_code if isinstance(e,httpx.HTTPStatusError) else None
-                log.warning("Provider %s model=%s failed %s status=%s detail=%s",provider,model,type(e).__name__,status,str(e)[:80] if type(e) is ValueError else "")
-                return None
-        for i in range(0,len(options),2):
-            tasks=[asyncio.create_task(try_one(o)) for o in options[i:i+2]]
-            try:
-                for task in asyncio.as_completed(tasks):
-                    result=await task
-                    if result is not None: return result
-            finally:
-                for task in tasks:
-                    if not task.done(): task.cancel()
-                await asyncio.gather(*tasks,return_exceptions=True)
+                if status is not None:_limit(provider,model,e.response)
+                log.warning("Provider %s model=%s role=%s failed %s status=%s",provider,model,role,type(e).__name__,status)
     return None
 
-async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10):
-    # Cap the entire discovery + retry operation; cancellation cleans up in-flight tasks.
+async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
     try:
-        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates),timeout=50)
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=50)
     except asyncio.TimeoutError:
-        log.warning("Provider routing deadline exceeded")
+        log.warning("Provider routing deadline exceeded role=%s",role)
         return None

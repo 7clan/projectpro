@@ -12,7 +12,7 @@ for _ in range(100):
         break
     except Exception:time.sleep(.3)
 else:raise RuntimeError("Server unavailable")
-cases=[("en",["kokoro-heart","kokoro-bella","kokoro-michael"])]
+cases=[("en",["kokoro-bella","kokoro-bella-smooth","kokoro-michael","kokoro-michael-smooth"])]
 results=[]
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=False,ignore_default_args=["--mute-audio"],args=["--window-size=1440,900","--window-position=0,0","--start-maximized","--autoplay-policy=no-user-gesture-required"])
@@ -38,9 +38,13 @@ with sync_playwright() as p:
         for voice in voices:
             rec=None;result={"voice":voice,"lang":lang,"lesson_mode":lesson.get("mode")}
             try:
-                page.locator("#studio-steps button").last.click()
+                page.locator("#studio-steps button").nth(1).click()
                 page.locator("#studio-voice-profile").select_option(voice,timeout=15000)
                 page.locator("#studio-voice").check()
+                audio_responses=[]
+                def capture_audio(r):
+                    if r.url.endswith("/api/studio/audio") and r.request.method=="POST":audio_responses.append((r.status,r.headers.get("x-studio-voice")))
+                page.on("response",capture_audio)
                 page.locator("#studio-svg").evaluate("(el)=>{el.dataset.audio='waiting';el.dataset.voiceBackend='';}")
                 rec=subprocess.Popen(["ffmpeg","-hide_banner","-loglevel","error","-y","-thread_queue_size","512","-f","x11grab","-framerate","20","-video_size","1440x900","-i",os.environ["DISPLAY"],"-thread_queue_size","512","-f","pulse","-i","declic.monitor","-c:v","libx264","-preset","ultrafast","-crf","24","-pix_fmt","yuv420p","-c:a","aac","-movflags","+faststart",str(out/(voice+".mp4"))],stdin=subprocess.PIPE)
                 time.sleep(1)
@@ -61,6 +65,8 @@ with sync_playwright() as p:
                 page.locator("#studio-voice-profile").scroll_into_view_if_needed()
                 page.screenshot(path=str(out/(voice+".png")))
                 wait_for(page,"document.querySelector('#studio-play').textContent.includes('Play') && document.querySelector('#studio-svg').dataset.audio==='ended'",timeout=70000)
+                assert len(audio_responses)==len(lesson["steps"])-1 and all(x==(200,voice) for x in audio_responses),audio_responses
+                result["scene_audio_responses"]=audio_responses
                 time.sleep(.5);rec.communicate(b"q",timeout=15);rec=None
                 check=subprocess.run(["ffmpeg","-hide_banner","-i",str(out/(voice+".mp4")),"-af","volumedetect","-vn","-f","null","-"],capture_output=True,text=True)
                 m=re.search(r"max_volume: (-?[0-9.]+)",check.stderr)
@@ -72,6 +78,7 @@ with sync_playwright() as p:
                 result.update({"pass":False,"error":str(exc)[:500]})
                 print("FAIL",voice,result["error"],flush=True)
             finally:
+                page.remove_listener("response",capture_audio) if "capture_audio" in locals() else None
                 if rec:
                     try:rec.communicate(b"q",timeout=15)
                     except Exception:rec.kill()
@@ -79,4 +86,4 @@ with sync_playwright() as p:
                 (out/"results.json").write_text(json.dumps(results,indent=2))
         ctx.close()
     browser.close()
-assert all(r["pass"] for r in results) and len(results)==3,results
+assert all(r["pass"] for r in results) and len(results)==4,results

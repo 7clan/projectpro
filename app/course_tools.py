@@ -14,7 +14,7 @@ class QuizRequest(BaseModel):
     kind: str = Field('recall',pattern='^(recall|conceptual|course_ai)$')
     difficulty: str = Field('adaptive',pattern='^(easy|hard|adaptive)$')
     lang: str = Field('fr',pattern='^(fr|en)$')
-    ai_mode: str = Field('hybrid',pattern='^(local|cloud|hybrid)$')
+    ai_mode: str = Field('hybrid',pattern='^(local|cloud|hybrid|ollama_cloud)$')
     consent_external: bool = False
 
 class QuizAnswers(BaseModel):

@@ -20,6 +20,7 @@ jobs:
       - run: pip install -r requirements-dev.txt playwright
       - run: python -m pytest -q && node --check app/static/studio.js
       - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
       - name: Record animated AI lesson
         run: |
           mkdir -p recordings
@@ -67,6 +68,8 @@ jobs:
           with open('recordings/lesson-responses.json','w') as f:json.dump(results,f,ensure_ascii=False,indent=2)
           print('PASS: two live AI lessons and eight visual scenes; browser audio not tested')
           PY
+      - name: Convert browser recording to MP4
+        run: ffmpeg -hide_banner -loglevel error -i "$(find recordings -name '*.webm' | head -1)" -c:v libx264 -pix_fmt yuv420p -movflags +faststart recordings/DECLIC-studio-live.mp4
       - uses: actions/upload-artifact@v4
         if: always()
         with:

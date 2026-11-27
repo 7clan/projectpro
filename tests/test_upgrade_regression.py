@@ -62,7 +62,7 @@ def test_router_deadline_returns_safe_fallback(monkeypatch):
 
 
 def test_unrelated_offline_question_has_no_fake_beam_lesson(client,auth):
-    r=client.post('/api/studio',headers=auth,json={'question':'Explain the Pythagorean theorem','lang':'en','generative':True})
+    r=client.post('/api/studio',headers=auth,json={'question':'Explain photosynthesis','lang':'en','generative':True})
     assert r.status_code==200
     data=r.json()
     assert data['mode']=='guided_offline'

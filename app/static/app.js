@@ -146,7 +146,7 @@ function applyAiMode(mode){
 }
 function configureAiModes(a){
  const modes=a.modes||{local:!!a.local_only,cloud:!a.local_only&&a.enabled,hybrid:false};
- const chosen=modes.hybrid?'hybrid':modes.cloud?'cloud':modes.local?'local':'hybrid';
+ const chosen=modes.hybrid?'hybrid':modes.ollama_cloud?'ollama_cloud':modes.cloud?'cloud':modes.local?'local':'hybrid';
  for(const select of document.querySelectorAll('.ai-mode-select')){
   for(const o of select.options)o.disabled=!modes[o.value];
   select.disabled=Object.values(modes).filter(Boolean).length<2;
@@ -167,7 +167,7 @@ document.getElementById('provider-check').onclick=async()=>{
  try{
   const r=await api('/api/providers/status');out.replaceChildren();
   for(const [name,p] of Object.entries(r.providers)){
-   const info=name==='ollama'?(p.installed?t('Modèle local installé','Local model installed'):p.reachable?t('Serveur actif · modèle absent','Server active · model missing'):t('Serveur local indisponible','Local server unavailable')):p.configured?t('Clé configurée · quota non testé','Key configured · quota not checked'):t('Non configuré','Not configured');
+   const info=name==='ollama_cloud'?(p.reachable?t('Ollama actif · connexion cloud non testée','Ollama reachable · cloud sign-in not tested'):t('Serveur Ollama indisponible','Ollama server unavailable')):name==='ollama'?(p.installed?t('Modèle local installé','Local model installed'):p.reachable?t('Serveur actif · modèle absent','Server active · model missing'):t('Serveur local indisponible','Local server unavailable')):p.configured?t('Clé configurée · quota non testé','Key configured · quota not checked'):t('Non configuré','Not configured');
    out.append(el('p',null,name+(p.model?' · '+p.model:'')+' — '+info));
   }
  }catch(e){showError(e)}finally{button.disabled=false}

@@ -2,6 +2,7 @@
 import asyncio
 import io
 import math
+import logging
 import re
 import shutil
 import struct
@@ -112,10 +113,10 @@ async def synthesize_preferred(text,lang,cues,cloud=False):
     split_cues(text,cues)
     if cloud:
         try:
-            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),24)
+            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),35)
             return audio,marks,'gemini-neural'
-        except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError):
-            pass
+        except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
+            logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
     try:
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
         return audio,marks,"piper-neural"
@@ -135,9 +136,14 @@ async def _gemini_render(text,lang,cues):
     if not re.fullmatch(r"gemini-[a-zA-Z0-9.-]+-tts",model): raise ValueError("Invalid TTS model")
     chunks=split_cues(text,cues)
     # Bound cost and latency. More complex scenes retain exact local timing.
-    if len(chunks)>4: raise ValueError("Too many cloud speech phrases")
+    # Coalesce excess reveal groups to a maximum of three phrases. All cue
+    # keys survive; adjacent cues may share a phrase-start timestamp.
+    while len(chunks)>3:
+        i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
+        a,aa=chunks[i];b,bb=chunks[i+1]
+        chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
     async with httpx.AsyncClient(timeout=18) as client:
-        semaphore=asyncio.Semaphore(2)
+        semaphore=asyncio.Semaphore(1)
         async def phrase(fragment,positions):
             language="French" if lang=="fr" else "English"
             prompt=f"Read only the following {language} passage verbatim, warmly and naturally, as a patient teacher. Do not add words or read the instruction.\n\n"+fragment
@@ -146,10 +152,10 @@ async def _gemini_render(text,lang,cues):
                     r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}}})
                     r.raise_for_status()
                 except httpx.HTTPError as e:
-                    raise RuntimeError("Cloud speech unavailable") from e
+                    raise RuntimeError("Cloud speech unavailable; status="+str(e.response.status_code if isinstance(e,httpx.HTTPStatusError) else type(e).__name__)) from e
             parts=[p["inlineData"] for c in r.json().get("candidates",[]) for p in c.get("content",{}).get("parts",[]) if "inlineData" in p]
-            if len(parts)!=1: raise ValueError("Missing or ambiguous audio")
-            raw=base64.b64decode(parts[0]["data"],validate=True)
+            if not parts: raise ValueError("Missing audio")
+            raw=b"".join(base64.b64decode(part["data"],validate=True) for part in parts)
             if len(raw)>3_000_000: raise ValueError("Audio too large")
             mime=parts[0].get("mimeType","").lower()
             if raw.startswith(b"RIFF"):

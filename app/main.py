@@ -545,7 +545,7 @@ async def studio_audio(payload: dict, request:Request,user=Depends(user_from_tok
 
 class StudioReviewRequest(BaseModel):
     question: str = Field(min_length=3,max_length=800)
-    steps: list[dict] = Field(min_length=2,max_length=5)
+    steps: list[dict] = Field(min_length=1,max_length=5)
     author_model: str = Field(min_length=1,max_length=200)
     consent_external: bool = False
     ai_mode: str = Field(default='hybrid',pattern='^(local|cloud|hybrid|ollama_cloud)$')
@@ -558,7 +558,7 @@ async def studio_review(payload:StudioReviewRequest,user=Depends(user_from_token
     if not payload.consent_external and payload.ai_mode!='local' and not local_generation_allowed():
         raise HTTPException(403,'External review requires consent')
     try:
-        steps=validate_board(json.dumps({'steps':payload.steps},ensure_ascii=False))
+        steps=validate_board(json.dumps({'steps':payload.steps},ensure_ascii=False),min_steps=1)
     except (ValueError,TypeError,KeyError):
         raise HTTPException(422,'Invalid visual lesson')
     with use_mode(payload.ai_mode,payload.consent_external):

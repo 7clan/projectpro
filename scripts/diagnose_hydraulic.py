@@ -51,8 +51,9 @@ async def capture(module):
 
 def validate(fn,raw):
     try:
-        steps,checks=fn(raw)
-        return {"accepted":True,"scenes":len(steps),"checks":len(checks)}
+        result=fn(raw)
+        steps,checks=result[:2]
+        return {"accepted":True,"scenes":len(steps),"checks":len(checks),"warnings":result[2] if len(result)>2 else []}
     except Exception as exc:
         return {"accepted":False,**safe_error(exc)}
 

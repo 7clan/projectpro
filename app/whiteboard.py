@@ -38,7 +38,7 @@ def keep_motion_visible(o):
     o["dx"]=max(-x1,min(600-x2,o["dx"]))
     o["dy"]=max(-y1,min(330-y2,o["dy"]))
 
-def validate_board(raw):
+def validate_board(raw, min_steps=2):
     if not isinstance(raw,str) or len(raw)>45000:
         raise ValueError("Invalid output")
     raw=raw.strip()
@@ -48,7 +48,7 @@ def validate_board(raw):
     if start<0 or end<start: raise ValueError("Missing JSON object")
     data=json.loads(raw[start:end+1])
     steps=data.get("steps") if isinstance(data,dict) else None
-    if not isinstance(steps,list) or not 2<=len(steps)<=5:
+    if not isinstance(steps,list) or not min_steps<=len(steps)<=5:
         raise ValueError("Invalid steps")
     result=[]
     for step in steps:
@@ -163,14 +163,14 @@ def pythagoras_objects(p, style):
         else:o["x"]=o["x"]*factor+ox;o["y"]=o["y"]*factor+oy
     return result
 
-def validate_compact(raw):
+def validate_compact(raw, min_steps=2):
     """Expand a compact, low-token instruction format into the same validated scene schema."""
     if not isinstance(raw,str) or len(raw)>45000: raise ValueError("Invalid output")
     start,end=raw.find("{"),raw.rfind("}")
     if start<0 or end<start: raise ValueError("Missing JSON object")
     d=json.loads(raw[start:end+1])
     if not isinstance(d,dict): raise ValueError('Invalid compact output')
-    if "steps" in d: return validate_board(raw)
+    if "steps" in d: return validate_board(raw,min_steps=min_steps)
     scenes=d.get("s")
     if not isinstance(scenes,list): raise ValueError("Missing compact scenes")
     # Optional shared compact objects reduce duplication in multi-stage lessons.
@@ -244,7 +244,7 @@ def validate_compact(raw):
                 if k in obj:num(obj[k],-200,750)
         fit_scene(objects)
         steps.append({"title":scene.get("h"),"formula":scene.get("e","—"),"narration":scene.get("n"),"objects":objects})
-    return validate_board(json.dumps({"steps":steps},ensure_ascii=False))
+    return validate_board(json.dumps({"steps":steps},ensure_ascii=False),min_steps=min_steps)
 
 def validate_lesson(raw):
     from .numerical_checks import validate_checks, verify_formula
@@ -291,9 +291,11 @@ async def generate(question, lang, sources, history):
             if start<0 or end<start:raise ValueError("Missing semantic plan")
             steps,checks=compile_plan(raw[start:end+1],question,lang)
         else:
-            steps,checks=validate_lesson(raw)
+            from .lesson_recovery import recover_lesson
+            steps,checks,warnings=recover_lesson(raw,question,lang)
+            return steps,checks,warnings
         checks.extend(verify_subject_labels(steps,question))
-        return steps,checks
+        return steps,checks,[]
     budget=800 if checked_example else 2600
     # Small local models use semantic plans, not the long free-form SVG prompt.
     hybrid=mode()=="hybrid" and bool(local_model())
@@ -306,7 +308,7 @@ async def generate(question, lang, sources, history):
     else:
         result=await route(system+"\n"+json.dumps(context,ensure_ascii=False),check,budget)
     if result is None: return None
-    (steps,checks),provider,model=result
+    (steps,checks,warnings),provider,model=result
     notice=("Plan IA · rendu mathématique contrôlé · contenu à vérifier" if lang=="fr" else "AI plan · checked mathematical rendering · verify content") if checked_example else ("Tableau généré par IA · contenu à vérifier" if lang=="fr" else "AI-generated whiteboard · verify educational content")
     if hydraulic and not checked_example:
         # Optional semantic audit must never block an otherwise safe lesson.
@@ -317,4 +319,7 @@ async def generate(question, lang, sources, history):
                 check_hydraulic(steps,hydraulic)
         except (ValueError,KeyError,TypeError,AttributeError):
             notice+=(" · Schéma physique à revoir" if lang=="fr" else " · Physical diagram needs review")
-    return {"mode":"live_ai","visual_mode":"generated","provider":provider,"model":model,"steps":steps,"numerical_checks":checks,"sources":sources,"notice":notice}
+    if warnings:
+        notice+=" · "+(" / ".join(warnings))
+    graphical=any(o["kind"]!="text" for step in steps for o in step["objects"])
+    return {"mode":"live_ai","visual_mode":"generated" if graphical else "text_only","provider":provider,"model":model,"steps":steps,"numerical_checks":checks,"quality_warnings":warnings,"sources":sources,"notice":notice}

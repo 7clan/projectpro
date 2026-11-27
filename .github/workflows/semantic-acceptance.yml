@@ -2,7 +2,7 @@ name: Live scientific visual and voice acceptance
 on:
   push:
     branches: [quality/semantic-visual-validation]
-    paths: ['.github/workflows/semantic-acceptance.yml', 'app/visual_checks.py', 'app/providers.py', 'app/whiteboard.py', 'app/voice.py', 'scripts/record_semantic_acceptance.py']
+    paths: ['.github/workflows/semantic-acceptance.yml', 'app/visual_checks.py', 'app/lesson_recovery.py', 'app/providers.py', 'app/whiteboard.py', 'app/voice.py', 'scripts/record_semantic_acceptance.py']
   workflow_dispatch:
 permissions:
   contents: read

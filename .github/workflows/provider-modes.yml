@@ -1,0 +1,39 @@
+name: Provider modes and cross-subject quiz acceptance
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/provider-modes.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      DECLIC_OLLAMA_MODEL: qwen2.5:3b-instruct
+      DECLIC_OLLAMA_TIMEOUT: '180'
+      OLLAMA_NO_CLOUD: '1'
+      GEMINI_API_KEY: ${{ secrets.GEMEINI }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+      BAZAARLINK_API_KEY: ${{ secrets.SOME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt
+      - name: Install local model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          if ! curl -fsS http://127.0.0.1:11434/api/version; then
+            nohup ollama serve >/tmp/ollama.log 2>&1 &
+          fi
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:11434/api/version && break; sleep 1; done
+          ollama pull "$DECLIC_OLLAMA_MODEL"
+      - name: Run actual separate local and cloud mode checks
+        run: PYTHONPATH=. python scripts/provider_modes_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-provider-modes-evidence
+          path: mode-evidence/

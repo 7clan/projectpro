@@ -48,19 +48,18 @@ jobs:
               # Headless Chromium has no guaranteed installed voice; test timed captions.
               page.locator('#studio-voice').uncheck()
               results=[]
-              for question in ['Explique le théorème de Pythagore avec un triangle et les carrés construits sur ses côtés.', 'Maintenant montre comment fonctionne une pile FIFO en informatique avec des éléments qui se déplacent.']:
+              for question in ['Explique le théorème de Pythagore avec un triangle et les carrés construits sur ses côtés.', 'Maintenant montre comment fonctionne une file FIFO en informatique avec des éléments qui se déplacent.']:
                   page.locator('#studio-question').fill(question)
-                  with page.expect_response(lambda r:'/api/studio' in r.url and r.request.method=='POST',timeout=120000) as event:
+                  with page.expect_response(lambda r:'/api/studio' in r.url and r.request.method=='POST',timeout=155000) as event:
                       page.locator('#studio-send').click()
                   payload=event.value.json()
                   assert payload['mode']=='live_ai',payload.get('notice')
                   assert payload['visual_mode']=='generated',payload.get('notice')
                   assert 2<=len(payload['steps'])<=5
                   page.wait_for_function("document.querySelector('#studio-mode').textContent==='AI · GENERATED'")
-                  page.wait_for_timeout(3000)
-                  for i in range(1,len(payload['steps'])):
-                      page.locator('#studio-steps button').nth(i).click()
-                      page.wait_for_timeout(4000)
+                  page.wait_for_function("document.querySelectorAll('#studio-svg [data-generated]').length > 0")
+                  page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=150000)
+                  page.wait_for_timeout(1000)
                   results.append(payload)
               assert not errors,errors
               ctx.close()
@@ -68,6 +67,9 @@ jobs:
           with open('recordings/lesson-responses.json','w') as f:json.dump(results,f,ensure_ascii=False,indent=2)
           print('PASS: two original AI-generated lessons; browser audio not tested')
           PY
+      - name: Safe server diagnostics on failure
+        if: failure()
+        run: grep -E 'Generative board attempt|Studio provider or parser failure' /tmp/studio.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

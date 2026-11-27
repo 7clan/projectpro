@@ -30,3 +30,13 @@ def test_compact_format_expands_safe_geometry():
     assert steps[0]["objects"][0]["points"]==[[40,40],[40,120],[100,120]]
     d["s"][0]["o"][0]["k"]="script"
     with pytest.raises(ValueError): validate_compact(json.dumps(d))
+
+
+def test_square_on_segment_constructs_exact_right_angles():
+    from app.whiteboard import validate_compact
+    d={"s":[{"h":"Square","e":"s²","n":"A square on a segment.","o":[{"k":"square_on_segment","p":[100,100,160,180,-1],"c":"purple","m":"grow"}]} for _ in range(2)]}
+    pts=validate_compact(json.dumps(d))[0]["objects"][0]["points"]
+    assert pts==[[100,100],[160,180],[240,120],[180,40]]
+    edges=[(pts[(i+1)%4][0]-pts[i][0],pts[(i+1)%4][1]-pts[i][1]) for i in range(4)]
+    assert all(x*x+y*y==10000 for x,y in edges)
+    assert edges[0][0]*edges[1][0]+edges[0][1]*edges[1][1]==0

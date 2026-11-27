@@ -599,3 +599,9 @@ install_assignments(app,user_from_token)
 
 from .speech_stream import install as install_speech_stream
 install_speech_stream(app)
+
+
+@app.get('/api/providers/status')
+async def providers_status(user=Depends(user_from_token)):
+    from .providers import provider_status
+    return await provider_status()

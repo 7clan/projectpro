@@ -2,7 +2,7 @@ name: Voice profiles audible acceptance
 on:
   push:
     branches: ['feature/voice-expansion']
-    paths: ['.github/workflows/voice-profiles.yml', 'scripts/voice_profiles_acceptance.py']
+    paths: ['.github/workflows/voice-profiles.yml', 'scripts/voice_profiles_acceptance.py', 'app/voice.py', 'app/main.py', 'app/static/studio.js']
   workflow_dispatch:
 permissions:
   contents: read

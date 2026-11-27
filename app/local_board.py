@@ -21,21 +21,27 @@ def triangle_dimensions(question):
     # Comma-separated lists without spaces are ambiguous, so require spaces
     # or a conjunction / semicolon for the supported list notation.
     prefix=r"(?:rectangle|triangle|sides|legs|côtés(?:\s+(?:perpendiculaires|de l.angle droit))?)\s+(?:(?:of|de|measuring|mesurant)\s+)?(?:lengths?\s+|longueurs?\s+|côtés\s+)?"
-    units=r"(?:\s*(?:units?|unités?|cm|mm|m)\b)?"
+    units=r"(?:\s*(units?|unités?|cm|mm|m)\b)?"
     sep=r"(?:\s*;\s*(?:(?:and|et)\s+)?|,\s+(?:(?:and|et)\s+)?|\s+(?:and|et)\s+)"
     # An explicitly supplied hypotenuse is not one of the two legs. Only
     # recognize a stated pair as legs when no assigned hypotenuse is present.
     assigned_hyp=re.search(r"(?:hypotenuse|hypoténuse)\s*(?:=|of|de|is|est|measures|mesure)\s*\d",q)
     parse=lambda x:float(x.replace(",","."))
+    def consistent_units(*items):
+        return len({("unit" if u.startswith(("unit",)) else u) for u in items if u})<=1
     triple=re.search(prefix+number+units+sep+number+units+sep+number+units+r"(?!\d|[.,]\d)",q)
     if triple:
-        a,b,c=map(parse,triple.groups())
+        x,u,y,v,z,w=triple.groups()
+        if not consistent_units(u,v,w):return {},True
+        a,b,c=map(parse,(x,y,z))
         if .1<=a<=100 and .1<=b<=100 and math.isclose(math.hypot(a,b),c,rel_tol=1e-8,abs_tol=1e-8):
             return {"a":a,"b":b},False
         return {},True
     pair=re.search(prefix+number+units+sep+number+units+r"(?!\d|[.,]\d)",q)
     if pair and not assigned_hyp:
-        a,b=map(parse,pair.groups())
+        x,u,y,v=pair.groups()
+        if not consistent_units(u,v):return {},True
+        a,b=map(parse,(x,y))
         if .1<=a<=100 and .1<=b<=100:
             return {"a":a,"b":b},False
     return {},bool(re.search(r"\d",q))

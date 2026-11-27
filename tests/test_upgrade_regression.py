@@ -45,6 +45,9 @@ def test_cloud_voice_requires_explicit_consent(client,auth,monkeypatch):
     assert received==[False,True]
 
 def test_voice_falls_back_when_cloud_fails(monkeypatch):
+    monkeypatch.delenv('OPENROUTER_API_KEY',raising=False)
+    monkeypatch.delenv('OPENROUTER',raising=False)
+    monkeypatch.setattr(voice,'_cloud_retry_at',0)
     async def fail(*args):raise RuntimeError("quota")
     monkeypatch.setattr(voice,'_gemini_render',fail)
     monkeypatch.setattr(voice,'_neural_render',lambda *a:(b'local',[{"at":0,"time":0}]))
@@ -104,6 +107,8 @@ def test_pythagorean_construction_has_outward_squares_and_exact_areas():
 
 
 def test_rate_limit_cooldown_avoids_repeated_cloud_requests(monkeypatch):
+    monkeypatch.delenv('OPENROUTER_API_KEY',raising=False)
+    monkeypatch.delenv('OPENROUTER',raising=False)
     calls=[]
     monkeypatch.setattr(voice,"_cloud_retry_at",0)
     async def limited(*args):
@@ -128,3 +133,35 @@ def test_named_equations_and_newton_labels():
     scene["objects"][2]["text"]="a = 4 m/s²"
     with pytest.raises(ValueError):verify_newton_labels([scene],"Deuxième loi de Newton")
     assert not verify_newton_labels([scene],"Autre sujet")
+
+
+def test_cloud_voice_uses_router_when_gemini_is_limited(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY","test-key")
+    monkeypatch.setattr(voice,"_cloud_retry_at",0)
+    monkeypatch.setattr(voice,"_router_voice_retry_at",0)
+    async def limited(*args):raise voice.CloudRateLimited(60)
+    async def router(*args):return b"router-audio",[{"at":0,"time":0}]
+    monkeypatch.setattr(voice,"_gemini_render",limited)
+    monkeypatch.setattr(voice,"_openrouter_render",router)
+    assert asyncio.run(voice.synthesize_preferred("Bonjour","fr",[0],cloud=True))[2]=="openrouter-heygen-neural"
+    assert asyncio.run(voice.synthesize_preferred("Bonjour","fr",[0],cloud=True))[2]=="openrouter-heygen-neural"
+
+def test_router_pcm_speech_has_exact_frame_cues(monkeypatch):
+    import httpx
+    monkeypatch.setenv("OPENROUTER_API_KEY","test-key")
+    calls=[]
+    class Client:
+        def __init__(self,**kw):pass
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def post(self,url,headers,json):
+            calls.append((url,json))
+            assert json["model"].endswith(":free")
+            return httpx.Response(200,headers={"content-type":"audio/pcm"},content=b"\x01\x00"*44100,request=httpx.Request("POST",url))
+    monkeypatch.setattr(httpx,"AsyncClient",Client)
+    audio,cues=asyncio.run(voice._openrouter_render("Bonjour tout le monde","fr",[0,.5]))
+    with wave.open(io.BytesIO(audio),"rb") as w:
+        assert w.getframerate()==44100
+        assert w.getnframes()==88200
+    assert cues==[{"at":0.0,"time":0},{"at":.5,"time":1}]
+    assert len(calls)==2

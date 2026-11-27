@@ -16,6 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt playwright
+      - run: python -m pytest -q
       - run: python scripts/install_voice_fallbacks.py
       - run: python -m playwright install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth

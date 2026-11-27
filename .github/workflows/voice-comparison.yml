@@ -1,0 +1,75 @@
+name: Neural voice comparison
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/voice-comparison.yml']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMEINI }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt -r requirements-voice.txt
+      - run: mkdir -p voices && python -m piper.download_voices --data-dir voices fr_FR-siwis-medium
+      - run: sudo apt-get update && sudo apt-get install -y espeak-ng
+      - name: Compare original and neural French voices
+        run: |
+          mkdir -p samples
+          python - <<'PY'
+          import asyncio,pathlib,json,io,wave,base64,os,httpx
+          from app.voice import synthesize,synthesize_preferred
+          folder=pathlib.Path("samples")
+          text="Observons ce triangle rectangle. Les carrés construits sur les deux petits côtés ont ensemble la même aire que le grand carré. Maintenant, à toi de jouer."
+          async def main():
+              old,_=await synthesize(text,"fr",[0,.45,.7])
+              neural,marks,backend=await synthesize_preferred(text,"fr",[0,.45,.7])
+              assert backend=="piper-neural"
+              folder.joinpath("01-espeak-original.wav").write_bytes(old)
+              folder.joinpath("02-piper-neural.wav").write_bytes(neural)
+              folder.joinpath("cue-timestamps.json").write_text(json.dumps(marks))
+              print("PASS: Piper neural voice with synchronized cues",flush=True)
+              key=os.getenv("GEMINI_API_KEY")
+              if not key:return
+              async with httpx.AsyncClient(timeout=30) as c:
+                  headers={"x-goog-api-key":key}
+                  try:
+                      r=await c.get("https://generativelanguage.googleapis.com/v1beta/models",headers=headers,params={"pageSize":100})
+                      r.raise_for_status()
+                      models=[m["name"] for m in r.json().get("models",[]) if "tts" in m["name"] and "generateContent" in m.get("supportedGenerationMethods",[])]
+                      models.sort(key=lambda n:("flash" in n,"lite" in n),reverse=True)
+                      for model in models[:2]:
+                          r=await c.post("https://generativelanguage.googleapis.com/v1beta/"+model+":generateContent",headers=headers,json={"contents":[{"parts":[{"text":"Read the following French text verbatim, in a clear, warm, natural teaching voice: "+text}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}}})
+                          print("Gemini TTS",model,r.status_code,flush=True)
+                          if not r.is_success:continue
+                          parts=[p for cand in r.json().get("candidates",[]) for p in cand.get("content",{}).get("parts",[]) if p.get("inlineData")]
+                          if not parts:continue
+                          data=base64.b64decode(parts[0]["inlineData"]["data"])
+                          mime=parts[0]["inlineData"].get("mimeType","")
+                          if data.startswith(b"RIFF"):
+                              audio=data
+                          elif "L16" in mime or "pcm" in mime.lower():
+                              b=io.BytesIO()
+                              with wave.open(b,"wb") as w:
+                                  w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000);w.writeframes(data)
+                              audio=b.getvalue()
+                          else:continue
+                          with wave.open(io.BytesIO(audio),"rb") as w:assert w.getnframes()>0
+                          folder.joinpath("03-gemini-neural.wav").write_bytes(audio)
+                          print("PASS: Gemini neural voice sample",flush=True)
+                          break
+                  except (httpx.HTTPError,ValueError,KeyError,TypeError) as e:
+                      print("Gemini speech unavailable",type(e).__name__,flush=True)
+          asyncio.run(main())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-voice-comparison
+          path: samples/

@@ -173,7 +173,8 @@ def homepage():
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'0.1.0','calculation_engine':'deterministic','ai':{**ai_status(),'local_only':local_generation_allowed(),'modes':configured_modes()}}
+    from .speech_stream import capabilities
+    return {'status':'ok','version':'0.1.0','calculation_engine':'deterministic','ai':{**ai_status(),'local_only':local_generation_allowed(),'modes':configured_modes()},'speech':capabilities()}
 
 
 @app.post('/api/auth/register', status_code=201)
@@ -595,3 +596,6 @@ install_course_tools(app,user_from_token)
 
 from .class_assignments import install as install_assignments
 install_assignments(app,user_from_token)
+
+from .speech_stream import install as install_speech_stream
+install_speech_stream(app)

@@ -81,3 +81,21 @@ def test_fish_voice_only_after_cloud_failures_and_consent(monkeypatch):
     assert not calls
     assert asyncio.run(voice.synthesize_preferred("Hello","en",[0],cloud=True))[2]=="openrouter-fish-neural"
     assert calls==["fish"]
+
+
+def test_shared_scene_objects_expand_without_weakening_checks():
+    data=fixture()
+    common=data["s"][0]["o"][0]
+    data["library"]=[common]
+    for scene in data["s"]:
+        scene["o"]=scene["o"][1:]
+        scene["use"]=["fluid"]
+    assert check(data)[-1]["output_N"]==1000
+    data["s"][-1]["use"]=["does_not_exist"]
+    with pytest.raises(ValueError):check(data)
+
+def test_shared_scene_rejects_duplicate_references():
+    data=fixture()
+    data["library"]=[data["s"][0]["o"][0]]
+    data["s"][0]["use"]=["fluid","fluid"]
+    with pytest.raises(ValueError):check(data)

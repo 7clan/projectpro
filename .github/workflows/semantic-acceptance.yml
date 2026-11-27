@@ -2,7 +2,7 @@ name: Live scientific visual and voice acceptance
 on:
   push:
     branches: [quality/semantic-visual-validation]
-    paths: ['.github/workflows/semantic-acceptance.yml', 'app/visual_checks.py', 'app/whiteboard.py', 'app/voice.py', 'scripts/record_semantic_acceptance.py']
+    paths: ['.github/workflows/semantic-acceptance.yml', 'app/visual_checks.py', 'app/providers.py', 'app/whiteboard.py', 'app/voice.py', 'scripts/record_semantic_acceptance.py']
   workflow_dispatch:
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1440x900x24" env PYTHONPATH=. python scripts/record_semantic_acceptance.py
       - name: Safe diagnostics
         if: always()
-        run: grep -E 'Provider .*failed|AI route success|voice rate limited|speech fallback|routing deadline' /tmp/semantic.log || true
+        run: grep -E 'Provider .*failed|AI route success|Visual validation rejected|voice rate limited|speech fallback|routing deadline' /tmp/semantic.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

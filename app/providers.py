@@ -229,7 +229,10 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     return c["message"].get("content") or ""
 
 async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=20,role="lesson"):
-    async with httpx.AsyncClient(timeout=12,trust_env=False) as client:
+    # Long multi-scene generation needs more time than a short coach response.
+    # Keep connection timeout short; preserve an absolute routing deadline.
+    read_timeout=35 if role=="lesson" and budget>=3000 else 12
+    async with httpx.AsyncClient(timeout=httpx.Timeout(read_timeout,connect=5),trust_env=False) as client:
         options=[o for o in await candidates(client) if o[1]!=exclude_model]
         local=[o for o in options if o[0]=="ollama" and _ready(o[0],o[1])]
         router=[o for o in options if o[0]=="openrouter" and _ready(o[0],o[1])]
@@ -248,9 +251,11 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
             if not _ready(provider,model):continue
             if attempts>=max_candidates:break
             attempts+=1
+            phase="inference"
             try:
                 raw=await complete(client,provider,model,key,prompt,budget)
                 if not isinstance(raw,str) or not raw.strip():raise ValueError("Empty model response")
+                phase="validation"
                 value=validator(raw)
                 log.warning("AI route success role=%s provider=%s model=%s",role,provider,model)
                 return value,provider,model
@@ -260,12 +265,13 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
                 elif isinstance(e,httpx.TimeoutException):
                     slot=(provider,model)
                     _cooldowns[slot]=max(_cooldowns.get(slot,0),time.monotonic()+60)
-                log.warning("Provider %s model=%s role=%s failed %s status=%s",provider,model,role,type(e).__name__,status)
+                # Do not log exception text: an upstream exception could contain prompt data.
+                log.warning("Provider %s model=%s role=%s failed %s status=%s phase=%s",provider,model,role,type(e).__name__,status,phase)
     return None
 
 async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=20,role="lesson"):
     try:
-        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if (local_model() and mode()!='cloud') or (cloud_model() and not local_only() and mode()!='disabled') else 50)
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if (local_model() and mode()!='cloud') or (cloud_model() and not local_only() and mode()!='disabled') else (110 if role=="lesson" and budget>=3000 else 50))
     except asyncio.TimeoutError:
         log.warning("Provider routing deadline exceeded role=%s",role)
         return None

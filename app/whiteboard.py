@@ -173,11 +173,27 @@ def validate_compact(raw):
     if "steps" in d: return validate_board(raw)
     scenes=d.get("s")
     if not isinstance(scenes,list): raise ValueError("Missing compact scenes")
+    # Optional shared compact objects reduce duplication in multi-stage lessons.
+    # Every scene expands to the same strictly validated rendered-object schema.
+    library=d.get("library",[])
+    if not isinstance(library,list) or len(library)>32:raise ValueError("Invalid shared objects")
+    from .visual_checks import ID
+    shared={}
+    for obj in library:
+        if not isinstance(obj,dict) or not isinstance(obj.get("id"),str) or not ID.fullmatch(obj["id"]) or obj["id"] in shared:
+            raise ValueError("Invalid shared object ID")
+        shared[obj["id"]]=obj
     steps=[]
     for scene in scenes:
         if not isinstance(scene,dict): raise ValueError("Invalid compact scene")
         objects=[]
-        for o in scene.get("o",[]):
+        refs=scene.get("use",[])
+        own=scene.get("o",[])
+        if not isinstance(refs,list) or len(refs)>32 or not isinstance(own,list) or len(refs)+len(own)>32:
+            raise ValueError("Invalid scene object count")
+        if any(not isinstance(ref,str) or ref not in shared for ref in refs) or len(set(refs))!=len(refs):
+            raise ValueError("Invalid shared object reference")
+        for o in [shared[ref] for ref in refs]+own:
             if not isinstance(o,dict): raise ValueError("Invalid compact object")
             k=o.get("k")
             p=o.get("p")
@@ -259,7 +275,11 @@ async def generate(question, lang, sources, history):
              "Optional stable compact object id (lowercase snake_case) enables visual_checks at the top level: "
              '{"scene":0,"op":"direction","a":"force","direction":"up"} or {"scene":0,"op":"width_ratio","a":"small","b":"large","ratio":2}. '
              "Also supported: motion_direction and motion_ratio (travel of a divided by travel of b). Only declare genuine relationships. "
-             "Never describe self-declared checks as independent scientific proof.")
+             "Never describe self-declared checks as independent scientific proof. "
+             'To reduce tokens, define repeated objects ONCE in top-level "library":[{"id":"base","k":"rect","p":[40,100,200,60]}]. '
+             'Each scene may have "use":["base"] plus its own "o":[...] objects. The use list copies shared objects into that scene. '
+             "Never duplicate an ID within a scene. For movement, define the moving version in that scene, not the shared library. "
+             "Use short natural narration and compact JSON; avoid repeating full coordinates when a shared object suffices.")
     hydraulic=hydraulic_inputs(question)
     if hydraulic:system+="\n"+hydraulic_prompt(hydraulic)
     # For explicit supported numerical examples the model selects a semantic
@@ -278,11 +298,18 @@ async def generate(question, lang, sources, history):
             if start<0 or end<start:raise ValueError("Missing semantic plan")
             steps,checks=compile_plan(raw[start:end+1],question,lang)
         else:
-            steps,checks=validate_lesson(raw)
-            checks.extend(validate_teaching(steps,raw,question))
+            try:
+                steps,checks=validate_lesson(raw)
+                checks.extend(validate_teaching(steps,raw,question))
+            except ValueError as exc:
+                # Fixed validator messages only: never echo raw model content.
+                known=("Missing hydraulic","Incorrect vector","Incorrect relative width","Incorrect displacement","Missing linked","Missing visual","Incorrect or missing label","Piston","Force","Missing pressure","Need at least","Repeated teaching","Invalid shared","Invalid compact","Incorrect visible","Displaced volume","Missing displacement","Insufficient graphical")
+                reason=str(exc)
+                logging.getLogger(__name__).warning("Visual validation rejected: %s",next((k for k in known if reason.startswith(k)),"schema or numerical check"))
+                raise
         checks.extend(verify_subject_labels(steps,question))
         return steps,checks
-    budget=800 if checked_example else 4400
+    budget=800 if checked_example else 3600
     # Small local models use semantic plans, not the long free-form SVG prompt.
     hybrid=mode()=="hybrid" and bool(local_model())
     if hybrid:

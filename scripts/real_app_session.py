@@ -1,3 +1,4 @@
+from browser_wait import wait_for
 import io
 import subprocess
 import time
@@ -38,7 +39,7 @@ with sync_playwright() as p:
         pause(page,1800)
         page.locator("#demo-login").click()
         expect(page.locator("#auth-overlay")).to_be_hidden()
-        page.wait_for_function("state.challenge!==null && !state.labBusy")
+        wait_for(page,"state.challenge!==null && !state.labBusy")
         pause(page,1800)
         page.locator('[data-view="lab"]').click()
         for name,value in {"length-input":"8","load-input":"12","position-input":"2","udl-input":"2"}.items():
@@ -47,7 +48,7 @@ with sync_playwright() as p:
             page.locator("#apply-beam").click()
         assert event.value.status==201
         expect(page.locator("#step-predict")).to_be_visible()
-        page.wait_for_function("!state.labBusy")
+        wait_for(page,"!state.labBusy")
         page.locator("#load-input").fill("16")
         page.locator('[data-pred="equal"]').click()
         expect(page.locator("#step-predict")).to_be_visible()
@@ -55,10 +56,10 @@ with sync_playwright() as p:
         page.locator("#load-input").fill("12")
         page.locator('[data-pred="equal"]').click()
         expect(page.locator("#step-solve")).to_be_visible()
-        page.wait_for_function("!state.labBusy")
+        wait_for(page,"!state.labBusy")
         cid=page.evaluate("state.challenge.id")
         page.reload()
-        page.wait_for_function("state.challenge!==null && !state.labBusy")
+        wait_for(page,"state.challenge!==null && !state.labBusy")
         assert page.evaluate("state.challenge.id")==cid
         page.locator('[data-view="lab"]').click()
         expect(page.locator("#step-solve")).to_be_visible()
@@ -68,19 +69,19 @@ with sync_playwright() as p:
         page.locator("#submit-solution").click()
         expect(page.locator("#solution-feedback")).to_contain_text("RA = 17")
         expect(page.locator("#solution-feedback")).to_contain_text("RB = 11")
-        page.wait_for_function("!state.labBusy")
+        wait_for(page,"!state.labBusy")
         checkpoint(page,"02-misconception-feedback")
         page.locator("#continue-explain").click()
         page.locator("#student-explanation").fill("Je calcule la somme des forces, les moments autour du support et les bras de levier.")
         page.locator("#submit-explanation").click()
         expect(page.locator("#explanation-feedback")).to_be_visible()
-        page.wait_for_function("!state.labBusy")
+        wait_for(page,"!state.labBusy")
         page.reload()
-        page.wait_for_function("state.challenge!==null && !state.labBusy")
+        wait_for(page,"state.challenge!==null && !state.labBusy")
         page.locator('[data-view="lab"]').click()
         expect(page.locator("#step-transfer")).to_be_visible()
         page.locator("#start-transfer").click()
-        page.wait_for_function("state.challenge.kind==='transfer' && !state.labBusy")
+        wait_for(page,"state.challenge.kind==='transfer' && !state.labBusy")
         assert page.evaluate("state.challenge.id")!=cid
         assert page.evaluate("state.solution===null")
         page.locator('[data-view="studio"]').click()
@@ -97,12 +98,12 @@ with sync_playwright() as p:
         answer="equal" if abs(ra-rb)<1e-8 else "left" if ra>rb else "right"
         page.locator('[data-pred="'+answer+'"]').click()
         expect(page.locator("#step-solve")).to_be_visible()
-        page.wait_for_function("!state.labBusy")
+        wait_for(page,"!state.labBusy")
         page.locator("#answer-ra").fill(str(round(ra,3)))
         page.locator("#answer-rb").fill(str(round(rb,3)))
         page.locator("#submit-solution").click()
         expect(page.locator("#solution-feedback")).to_have_class("feedback success")
-        page.wait_for_function("!state.labBusy")
+        wait_for(page,"!state.labBusy")
         checkpoint(page,"04-independent-transfer-success")
         page.locator('[data-view="library"]').click()
         page.locator("#course-file").set_input_files("data/demo_rdm2.pdf")
@@ -111,10 +112,10 @@ with sync_playwright() as p:
         assert event.value.status==201
         doc=event.value.json()["id"]
         expect(page.locator("#reader")).to_be_visible()
-        page.wait_for_function("state.reader && !state.readerLoading && document.querySelector('#reader-image').naturalWidth>0")
+        wait_for(page,"state.reader && !state.readerLoading && document.querySelector('#reader-image').naturalWidth>0")
         checkpoint(page,"05-pdf-auto-open")
         page.locator("#next-page").click()
-        page.wait_for_function("state.reader.page===1 && !state.readerLoading")
+        wait_for(page,"state.reader.page===1 && !state.readerLoading")
         expect(page.locator("#reader-page")).to_contain_text("2 /")
         page.locator("#text-page").click()
         expect(page.locator("#reader-text")).to_be_visible()
@@ -130,7 +131,7 @@ with sync_playwright() as p:
         checkpoint(page,"07-source-grounded-offline-studio")
         source=lesson["sources"][0]
         page.locator("#studio-sources button").first.click()
-        page.wait_for_function("(source)=>state.currentView==='library' && state.reader && state.reader.id===source.document_id && state.reader.page===source.page && !state.readerLoading",arg=source)
+        wait_for(page,"(source)=>state.currentView==='library' && state.reader && state.reader.id===source.document_id && state.reader.page===source.page && !state.readerLoading",arg=source)
         assert page.evaluate("state.reader.id")==source["document_id"]
         assert page.evaluate("state.reader.page")==source["page"]
         checkpoint(page,"08-source-exact-page")
@@ -157,8 +158,8 @@ with sync_playwright() as p:
         (OUT/"live-lesson.json").write_text(json.dumps(live,ensure_ascii=False,indent=2))
         generated=live.get("visual_mode")=="generated" and live.get("mode")=="live_ai"
         if generated:
-            page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
-            page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
+            wait_for(page,"document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
+            wait_for(page,"document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
             assert page.locator("#studio-svg").get_attribute("data-audio")=="ended"
             assert any(x["status"]==200 and x["backend"] for x in audio_responses),"No server-generated app speech"
             trace=page.evaluate("window.studioTrace")
@@ -180,8 +181,8 @@ with sync_playwright() as p:
             (OUT/"follow-up.json").write_text(json.dumps(follow,ensure_ascii=False,indent=2))
             follow_ok=follow.get("mode")=="live_ai" and follow.get("visual_mode")=="generated"
             if follow_ok:
-                page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
-                page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
+                wait_for(page,"document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=55000)
+                wait_for(page,"document.querySelector('#studio-play').textContent.includes('Play')",timeout=200000)
                 checkpoint(page,"live-follow-up")
             else:
                 page.wait_for_timeout(2200)
@@ -189,7 +190,7 @@ with sync_playwright() as p:
         page.locator('[data-view="library"]').click()
         page.evaluate("state.readerSeconds=10")
         page.locator('[data-view="dashboard"]').click()
-        page.wait_for_function("state.readerSeconds===0")
+        wait_for(page,"state.readerSeconds===0")
         page.wait_for_timeout(5500)
         assert page.evaluate("state.readerSeconds===0")
         page.locator('[data-view="library"]').click()
@@ -199,7 +200,7 @@ with sync_playwright() as p:
         page.locator('[data-view="profile"]').click()
         page.locator("#plan-minutes").select_option("45")
         expect(page.locator("#study-plan-tasks .plan-task")).to_have_count(3)
-        page.wait_for_function("Array.from(document.querySelectorAll('#study-plan-tasks .plan-task')).reduce((n,b)=>n+parseInt(b.textContent),0)===45")
+        wait_for(page,"Array.from(document.querySelectorAll('#study-plan-tasks .plan-task')).reduce((n,b)=>n+parseInt(b.textContent),0)===45")
         checkpoint(page,"10-adaptive-study-plan")
         page.locator("#delete-account").click()
         expect(page.locator("#auth-overlay")).to_be_visible()

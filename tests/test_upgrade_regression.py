@@ -101,3 +101,30 @@ def test_pythagorean_construction_has_outward_squares_and_exact_areas():
             assert max(x*x+y*y for x,y in edges)-min(x*x+y*y for x,y in edges)<1e-6
             assert abs(edges[0][0]*edges[1][0]+edges[0][1]*edges[1][1])<1e-6
             assert all(10<=x<=590 and 10<=y<=320 for x,y in square["points"])
+
+
+def test_rate_limit_cooldown_avoids_repeated_cloud_requests(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(voice,"_cloud_retry_at",0)
+    async def limited(*args):
+        calls.append(1)
+        raise voice.CloudRateLimited(60)
+    monkeypatch.setattr(voice,"_gemini_render",limited)
+    monkeypatch.setattr(voice,"_neural_render",lambda *a:(b"local",[{"at":0,"time":0}]))
+    async def run():
+        assert (await voice.synthesize_preferred("Bonjour", "fr",[0],cloud=True))[2]=="piper-neural"
+        assert (await voice.synthesize_preferred("Autre question", "fr",[0],cloud=True))[2]=="piper-neural"
+    asyncio.run(run())
+    assert len(calls)==1
+
+def test_named_equations_and_newton_labels():
+    from app.numerical_checks import verify_formula,verify_newton_labels
+    assert verify_formula("a = 6 / 2 = 3 m/s²")
+    assert verify_formula("x = 1,5 + 2,5 = 4")
+    with pytest.raises(ValueError):verify_formula("a = 6 / 2 = 4 m/s²")
+    with pytest.raises(ValueError):verify_formula("6 / 0 = 1")
+    scene={"formula":"F = m × a","objects":[{"kind":"text","text":t} for t in ["F = 6 N","m = 2 kg","a = 3 m/s²"]]}
+    assert verify_newton_labels([scene],"Deuxième loi de Newton")
+    scene["objects"][2]["text"]="a = 4 m/s²"
+    with pytest.raises(ValueError):verify_newton_labels([scene],"Deuxième loi de Newton")
+    assert not verify_newton_labels([scene],"Autre sujet")

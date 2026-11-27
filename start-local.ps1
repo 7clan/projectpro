@@ -17,7 +17,7 @@ if (-not $CloudModel) { $CloudModel = $env:DECLIC_OLLAMA_CLOUD_MODEL }
 if ($CloudModel) {
     if ($CloudModel -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]{0,160}:cloud$') { throw "Cloud model must use its Ollama :cloud name." }
     $env:DECLIC_OLLAMA_CLOUD_MODEL = $CloudModel
-    $Hybrid = $true
+    if ($PSBoundParameters.ContainsKey("CloudModel")) { $Hybrid = $true }
 }
 
 try {
@@ -26,7 +26,7 @@ try {
     throw "Ollama is not responding. Open Ollama from the Windows Start menu, then rerun this script."
 }
 $local = @($installed | Where-Object { $_.name -and $_.name -notmatch "cloud" -and -not $_.remote_model -and -not $_.remote_host })
-if ($local.Count -eq 0 -and -not $CloudModel) { throw "No local model found. Select an Ollama Cloud model with -CloudModel or install a local model." }
+if ($local.Count -eq 0 -and (-not $CloudModel -or -not $Hybrid)) { throw "No local model found. Select an Ollama Cloud model with -CloudModel or install a local model." }
 if (-not $Model -and $local.Count -gt 0) {
     Write-Host "Available local models:"
     for ($i=0; $i -lt $local.Count; $i++) {

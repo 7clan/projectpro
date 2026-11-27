@@ -29,6 +29,9 @@ def _limit(provider,model,response):
 
 async def candidates(client):
     result=[]
+    local=os.getenv('DECLIC_OLLAMA_MODEL','').strip()
+    if local:result.append(('ollama',local,''))
+    if os.getenv('DECLIC_LOCAL_ONLY')=='1':return result
     key=os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI")
     if key:
         try:
@@ -64,6 +67,11 @@ async def candidates(client):
     return result
 
 async def complete(client,provider,model,key,prompt,budget=3000):
+    if provider=="ollama":
+        # Fixed loopback endpoint; clients cannot supply server URLs or models.
+        r=await client.post("http://127.0.0.1:11434/api/chat",json={"model":model,"messages":[{"role":"user","content":prompt}],"stream":False,"format":"json","options":{"num_predict":budget,"temperature":0.3}})
+        r.raise_for_status()
+        return r.json()["message"]["content"]
     if provider=="gemini":
         r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.4,"maxOutputTokens":max(6000,budget),"responseMimeType":"application/json"}})
         r.raise_for_status()
@@ -86,8 +94,9 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     return c["message"].get("content") or ""
 
 async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
-    async with httpx.AsyncClient(timeout=12) as client:
+    async with httpx.AsyncClient(timeout=12,trust_env=False) as client:
         options=[o for o in await candidates(client) if o[1]!=exclude_model]
+        local=[o for o in options if o[0]=="ollama" and _ready(o[0],o[1])]
         router=[o for o in options if o[0]=="openrouter" and _ready(o[0],o[1])]
         bazaar=[o for o in options if o[0]=="bazaarlink" and _ready(o[0],o[1])]
         gemini=[o for o in options if o[0]=="gemini" and _ready(o[0],o[1])]
@@ -106,6 +115,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
         if len(second)>1:options.append(second[1])
         options.extend(gemini[:2])
         if not first and not second:options=gemini[:3]
+        options=local+options if os.getenv("DECLIC_LOCAL_ONLY")=="1" else options+local
         for provider,model,key in options[:max_candidates]:
             if not _ready(provider,model):continue
             try:

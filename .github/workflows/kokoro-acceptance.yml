@@ -23,6 +23,15 @@ jobs:
           mkdir -p voices/kokoro
           curl -fL --retry 2 https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx -o voices/kokoro/kokoro-v1.0.onnx
           curl -fL --retry 2 https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin -o voices/kokoro/voices-v1.0.bin
+      - name: Install official Pocket TTS standalone runtime
+        run: |
+          mkdir -p voices/pocket
+          curl -fL --retry 2 https://github.com/kyutai-labs/pocket-tts/releases/download/v4.0.1/pocket-tts-3.3.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/pocket.tar.gz
+          mkdir -p /tmp/pocket
+          tar -xzf /tmp/pocket.tar.gz -C /tmp/pocket
+          install -m 755 "$(find /tmp/pocket -type f -name pocket-tts | head -1)" voices/pocket/pocket-tts
+          voices/pocket/pocket-tts generate --language english_2026-10 --voice alba --text "Welcome to today's lesson." --output-path /tmp/pocket-warmup.wav
+          voices/pocket/pocket-tts generate --language english_2026-10 --voice george --text "Welcome to today's lesson." --output-path /tmp/pocket-warmup-george.wav
       - run: python -m pytest -q && node --check app/static/studio.js
       - name: Record real browser and voice playback
         run: |
@@ -35,5 +44,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: DECLIC-Kokoro-English-recordings
+          name: DECLIC-Michael-Pocket-comparison
           path: kokoro-evidence/

@@ -1,0 +1,81 @@
+name: Provider capability check
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/provider-check.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {key: OPENROUTER, provider: openrouter}
+          - {key: OPENROUTER2, provider: openrouter}
+          - {key: OPENROUTER_API_KEY, provider: openrouter}
+          - {key: OPENROUTER_API_KEY_2, provider: openrouter}
+          - {key: GEMINI_API_KEY, provider: gemini}
+          - {key: GEMINI_API_KEY_2, provider: gemini}
+          - {key: GROQ_API_KEY, provider: groq}
+          - {key: GROQ, provider: groq}
+          - {key: CEREBRAS_API_KEY, provider: cerebras}
+          - {key: CEREBRAS, provider: cerebras}
+          - {key: MISTRAL_API_KEY, provider: mistral}
+          - {key: NVIDIA_API_KEY, provider: nvidia}
+    env:
+      KEY: ${{ secrets[matrix.key] }}
+      PROVIDER: ${{ matrix.provider }}
+      KEY_NAME: ${{ matrix.key }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install httpx
+      - name: Test provider
+        run: |
+          python - <<'PY'
+          import os, httpx, json
+          k=os.getenv("KEY")
+          p=os.environ["PROVIDER"]
+          n=os.environ["KEY_NAME"]
+          if not k:
+              print(n+": NOT CONFIGURED")
+              raise SystemExit(0)
+          models={
+              "openrouter":("https://openrouter.ai/api/v1/chat/completions",["openrouter/free"]),
+              "groq":("https://api.groq.com/openai/v1/chat/completions",["openai/gpt-oss-120b","openai/gpt-oss-20b"]),
+              "cerebras":("https://api.cerebras.ai/v1/chat/completions",["gpt-oss-120b"]),
+              "mistral":("https://api.mistral.ai/v1/chat/completions",["mistral-small-latest"]),
+              "nvidia":("https://integrate.api.nvidia.com/v1/chat/completions",["meta/llama-3.3-70b-instruct"])
+          }
+          prompt='Return only JSON: {"answer":25,"explanation":"3 squared plus 4 squared equals 25"}'
+          ok=False
+          with httpx.Client(timeout=40) as c:
+              if p=="gemini":
+                  candidates=["gemini-2.5-flash","gemini-2.5-flash-lite"]
+              else:
+                  url,candidates=models[p]
+              for m in candidates:
+                  try:
+                      if p=="gemini":
+                          r=c.post("https://generativelanguage.googleapis.com/v1beta/models/"+m+":generateContent",headers={"x-goog-api-key":k},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":1024}})
+                          if r.is_success:
+                              out=" ".join(x.get("text","") for a in r.json().get("candidates",[]) for x in a.get("content",{}).get("parts",[]) if not x.get("thought"))
+                      else:
+                          r=c.post(url,headers={"Authorization":"Bearer "+k},json={"model":m,"messages":[{"role":"user","content":prompt}],"max_tokens":1024})
+                          if r.is_success:
+                              out=r.json()["choices"][0]["message"].get("content") or ""
+                      print(n,m,"HTTP",r.status_code)
+                      if r.is_success:
+                          a=json.loads(out[out.index("{"):out.rindex("}")+1])
+                          if a.get("answer")==25:
+                              print("PASS: structured response")
+                              ok=True
+                          else:
+                              print("FAIL: incorrect value")
+                  except Exception as e:
+                      print("FAIL:",type(e).__name__)
+          if not ok: raise SystemExit(1)
+          PY

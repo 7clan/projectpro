@@ -83,3 +83,21 @@ def test_fit_scene_preserves_geometry():
     assert 10<=a[0]<=590 and 10<=a[1]<=320
     assert a[1]==b[1] and a[0]==c[0]
     assert abs((b[0]-a[0])/(c[1]-a[1])-4/3)<.0001
+
+
+def test_pythagorean_construction_has_outward_squares_and_exact_areas():
+    from app.whiteboard import pythagoras_objects
+    style={"at":0,"color":"ink","motion":"draw","duration":1,"width":2,"fill":0}
+    for a,b in [(4,3),(4,-3),(-4,3),(-4,-3)]:
+        objs=pythagoras_objects([280,160,a,b,20],style)
+        tri=objs[-1]["points"]
+        assert sorted(float(o["text"]) for o in objs if o["kind"]=="text")==[9,16,25]
+        for i,square in enumerate(objs[::2][:3]):
+            p,q,r,t=square["points"];opp=tri[(i+2)%3]
+            assert p==tri[i] and q==tri[(i+1)%3]
+            def cross(u,v,w):return (v[0]-u[0])*(w[1]-u[1])-(v[1]-u[1])*(w[0]-u[0])
+            assert cross(p,q,opp)*cross(p,q,r)<0
+            edges=[(v[0]-u[0],v[1]-u[1]) for u,v in zip([p,q,r,t],[q,r,t,p])]
+            assert max(x*x+y*y for x,y in edges)-min(x*x+y*y for x,y in edges)<1e-6
+            assert abs(edges[0][0]*edges[1][0]+edges[0][1]*edges[1][1])<1e-6
+            assert all(10<=x<=590 and 10<=y<=320 for x,y in square["points"])

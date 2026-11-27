@@ -180,3 +180,14 @@ Expand-Archive speech-models/en.zip -DestinationPath speech-models -Force
 Restart DÉCLIC and choose Vosk recognition in Studio. Vosk accepts streaming 16 kHz PCM via the authenticated same-origin WebSocket and returns partial and final transcripts. Audio is not stored. Local speech is processed on the **DÉCLIC server**, so it is on your own laptop only when you run the server there. Browser recognition remains optional in cloud/hybrid mode. Use headphones; automatic acoustic interruption is experimental, and true simultaneous model output streaming remains unimplemented. See [Vosk models and licenses](https://alphacephei.com/vosk/models). The real browser acceptance test used French synthetic microphone audio, not a physical device.
 
 The new AI Course MCQ option samples up to four indexed pages and returns up to six questions per request. It requires an exact supporting excerpt and a correct option appearing in that excerpt. Independent model review, when available, can reject the batch; otherwise it is labelled unreviewed. These checks do not prove conceptual correctness or full-course coverage. Source recall and deterministic RDM2 questions remain separate choices.
+
+
+## Use Ollama Cloud from your existing Windows desktop app
+
+Sign in to Ollama and select a working cloud model in its desktop chat. Start DÉCLIC with the exact cloud name displayed there, e.g.:
+
+```powershell
+powershell -ExecutionPolicy RemoteSigned -File .\start-local.ps1 -Hybrid -Model qwen2.5-coder:3b -CloudModel nemotron-3-super:cloud
+```
+
+No new model weights or separate Ollama API key are required. The launcher reads private .env settings automatically. In Studio, Coach or Quiz select Ollama · Cloud, then grant external processing consent. Cloud requests are sent through the fixed localhost Ollama API, and Ollama authenticates and executes them remotely. Cloud models do not support structured outputs, so DÉCLIC requests plain JSON and validates it before using it. Local mode remains isolated from cloud requests. Hybrid can fall back to the configured cloud model; cloud usage is subject to the Ollama account's current plan, quotas and charges. The provider panel checks daemon reachability, not cloud authentication or remaining quota. To change cloud model, restart with a different -CloudModel value or configure DECLIC_OLLAMA_CLOUD_MODEL in .env. Never assume this mode is offline. See https://docs.ollama.com/cloud/models and https://docs.ollama.com/capabilities/structured-outputs.

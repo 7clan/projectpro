@@ -62,3 +62,59 @@ async def synthesize(text,lang,cues):
         w.setnchannels(params.nchannels);w.setsampwidth(params.sampwidth);w.setframerate(params.framerate)
         w.writeframes(b''.join(frames))
     return out.getvalue(),marks
+
+# Optional local neural voice. eSpeak remains available as an explicitly enabled
+# emergency backend, not the default audible experience.
+import os
+import threading
+from pathlib import Path
+from functools import lru_cache
+
+_VOICE_LOCK=threading.Lock()
+_VOICE_NAMES={"fr":"fr_FR-siwis-medium","en":"en_US-lessac-medium"}
+
+@lru_cache(maxsize=2)
+def _piper_voice(path):
+    from piper import PiperVoice
+    return PiperVoice.load(path)
+
+def _neural_render(text,lang,cues):
+    directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
+    path=directory/(_VOICE_NAMES[lang]+".onnx")
+    if not path.is_file() or not Path(str(path)+".json").is_file():
+        raise FileNotFoundError("Neural voice model not installed")
+    chunks=split_cues(text,cues)
+    # Avoid extra inter-fragment gaps: use actual frame counts for all cue offsets.
+    frames=[];marks=[];params=None;offset=0
+    with _VOICE_LOCK:
+        voice=_piper_voice(str(path))
+        for fragment,positions in chunks:
+            buffer=io.BytesIO()
+            with wave.open(buffer,"wb") as w:
+                voice.synthesize_wav(fragment,w)
+            with wave.open(io.BytesIO(buffer.getvalue()),"rb") as w:
+                p=w.getparams()
+                if params is None: params=p
+                if (p.nchannels,p.sampwidth,p.framerate)!=(params.nchannels,params.sampwidth,params.framerate):
+                    raise ValueError("Inconsistent neural voice format")
+                data=w.readframes(p.nframes)
+                if not data or p.nframes<1: raise ValueError("Empty neural voice fragment")
+                marks.extend({"at":f,"time":round(offset/p.framerate,4)} for f in positions)
+                frames.append(data);offset+=p.nframes
+    out=io.BytesIO()
+    with wave.open(out,"wb") as w:
+        w.setnchannels(params.nchannels);w.setsampwidth(params.sampwidth);w.setframerate(params.framerate)
+        w.writeframes(b"".join(frames))
+    return out.getvalue(),marks
+
+async def synthesize_preferred(text,lang,cues):
+    # Validate user-controlled inputs before attempting a backend.
+    split_cues(text,cues)
+    try:
+        audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
+        return audio,marks,"piper-neural"
+    except (ImportError,FileNotFoundError,OSError,RuntimeError,ValueError):
+        if os.getenv("DECLIC_ALLOW_ESPEAK")=="1":
+            audio,marks=await synthesize(text,lang,cues)
+            return audio,marks,"espeak-fallback"
+        raise FileNotFoundError("Neural voice unavailable; use browser speech") from None

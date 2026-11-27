@@ -29,6 +29,8 @@ jobs:
           gh run download 46059961381 -n DECLIC-main-voice_pdf-video-and-evidence -D raw/08
           gh run download 46075578517 -n DECLIC-live-AI-bilingual-audible-proof -D raw/09
           gh run download 46055317054 -n real-scientific-visual-acceptance -D raw/10
+      - name: Install media verification tool
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Organize and inspect actual media
         run: |
           python - <<'PY'

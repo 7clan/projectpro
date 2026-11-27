@@ -1,0 +1,76 @@
+name: Record live AI demonstration
+on:
+  push:
+    paths: ['.github/workflows/record-ai.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+      OPENROUTER_MODEL: google/gemini-2.5-flash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Record actual browser session
+        run: |
+          mkdir -p recordings
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/declic-server.log 2>&1 &
+          python - <<'PY'
+          import time, urllib.request, os, json
+          from playwright.sync_api import sync_playwright
+          assert os.environ.get('OPENROUTER_API_KEY'), 'Missing OpenRouter secret'
+          for i in range(50):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:8000/api/health')
+                  break
+              except Exception:
+                  time.sleep(.4)
+          responses=[]
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              ctx=browser.new_context(viewport={'width':1440,'height':900},record_video_dir='recordings',record_video_size={'width':1440,'height':900})
+              page=ctx.new_page()
+              page.on('dialog',lambda d:d.accept())
+              page.goto('http://127.0.0.1:8000')
+              page.locator('#demo-login').click()
+              page.locator('#ai-mode').get_by_text('Coach IA actif',exact=False).wait_for(timeout=15000) if False else None
+              page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('openrouter')")
+              page.wait_for_timeout(2500)
+              page.locator('[data-view="coach"]').click()
+              page.wait_for_timeout(1800)
+              for q in [
+                  "Pourquoi une charge répartie uniforme peut-elle être remplacée par une force au milieu de la poutre ?",
+                  "Je pense que les réactions sont toujours égales, même si la charge ponctuelle est proche de A. Est-ce correct ?",
+                  "Sans me donner la solution numérique, propose une question pour vérifier si je comprends les moments et les bras de levier."
+              ]:
+                  page.locator('#chat-input').fill(q)
+                  page.wait_for_timeout(700)
+                  with page.expect_response(lambda r:'/api/coach' in r.url and r.request.method=='POST',timeout=45000) as event:
+                      page.locator('#chat-form button').click()
+                  response=event.value.json()
+                  assert response['mode']=='live_ai', response.get('mode')
+                  responses.append({'question':q,'answer':response['answer'],'sources':response['sources'],'mode':response['mode']})
+                  page.wait_for_timeout(6000)
+              page.locator('[data-view="lab"]').click()
+              page.wait_for_timeout(4000)
+              page.locator('[data-view="profile"]').click()
+              page.wait_for_timeout(3000)
+              ctx.close()
+              browser.close()
+          with open('recordings/live-responses.json','w') as f: json.dump(responses,f,ensure_ascii=False,indent=2)
+          print('PASS: three live AI responses recorded in real browser')
+          PY
+          ffmpeg -hide_banner -loglevel error -i "$(find recordings -name '*.webm' | head -1)" -c:v libx264 -pix_fmt yuv420p -movflags +faststart recordings/DECLIC-live-AI.mp4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-live-AI-video
+          path: recordings/

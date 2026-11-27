@@ -71,7 +71,9 @@ with sync_playwright() as p:
             (out/(label+".trace.json")).write_text(json.dumps(trace,ensure_ascii=False,indent=2))
             assert any(e["at"]>0 and e["audioTime"] is not None and e["audioTime"]>0 for e in trace),"No synchronized reveal during audio"
             result["synchronized_reveal"]=True
+            result["final_label_collisions"]=page.locator('#studio-svg [data-label-collision="true"]').count()
             page.screenshot(path=str(out/(label+"-final.png")))
+            assert result["final_label_collisions"]==0,"Final scene has unresolved label collisions"
             time.sleep(1)
             rec.communicate(b"q",timeout=20);rec=None
             f=out/(label+".mp4")

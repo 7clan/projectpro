@@ -58,7 +58,7 @@ def parse_narrations(raw, lesson):
 async def teach(question, beam, lang, sources, history, consent):
     # Never pass off the illustrative beam lesson as an answer to another subject.
     q=question.casefold()
-    if not any(term in q for term in ("rdm","poutre","beam","charge","load","réaction","reaction","appui","support","moment","levier","torque","lever","équilibre","equilibrium","force","statique","statics","fléch","shear","tranchant")):
+    if not any(term in q for term in ("rdm","poutre","beam","charge","load","réaction","reaction","appui","support","moment","levier","torque","lever","équilibre","equilibrium","force balance","forces verticales","statique","statics","fléch","shear","tranchant")):
         fr=lang=="fr"
         return {"mode":"guided_offline","sources":sources,"steps":[{"scene":"unavailable","title":"Leçon indisponible" if fr else "Lesson unavailable","formula":"—","narration":"Le tableau génératif n’est pas disponible pour cette question. Réessaie avec l’IA externe activée. Le guide local est limité aux poutres et à l’équilibre statique." if fr else "A generated board is not available for this question. Try again with external AI enabled. The local guide is limited to beams and static equilibrium."}],"notice":"Limite du guide local" if fr else "Local guide limitation"}
     lesson=local_lesson(question,lang,sources)

@@ -185,6 +185,7 @@ def validate_compact(raw):
             fields={"line":("x","y","x2","y2"),"arrow":("x","y","x2","y2"),"circle":("x","y","r"),"rect":("x","y","w","h"),"ellipse":("x","y","rx","ry"),"text":("x","y","size")}
             if "id" in o:obj["id"]=o["id"]
             if k=="right_triangle_squares":
+                obj.pop("id",None)
                 objects.extend(pythagoras_objects(p,obj))
                 continue
             if k in fields:

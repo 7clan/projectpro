@@ -58,6 +58,8 @@ with sync_playwright() as p:
             page.locator("#studio-play").click()
             page.wait_for_function("document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=30000)
             assert int(page.locator("#studio-svg").get_attribute("data-cue-count") or 0)>0
+            result["voice_backend"]=page.locator("#studio-svg").get_attribute("data-voice-backend")
+            if os.getenv("DECLIC_REQUIRE_NEURAL")=="1": assert result["voice_backend"]=="piper-neural",result["voice_backend"]
             page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=150000)
             assert page.locator("#studio-svg").get_attribute("data-audio")=="ended"
             trace=page.evaluate("window.studioTrace")

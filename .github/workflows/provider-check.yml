@@ -16,6 +16,7 @@ jobs:
           - {key: OPENROUTER2, provider: openrouter}
           - {key: OPENROUTER_API_KEY, provider: openrouter}
           - {key: OPENROUTER_API_KEY_2, provider: openrouter}
+          - {key: GEMEINI, provider: gemini}
           - {key: GEMINI_API_KEY, provider: gemini}
           - {key: GEMINI_API_KEY_2, provider: gemini}
           - {key: GROQ_API_KEY, provider: groq}

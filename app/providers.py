@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import math
+import re
 import httpx
 from contextvars import ContextVar
 from contextlib import contextmanager
@@ -35,6 +36,11 @@ def local_model():
     if not name or "cloud" in name.casefold() or "/" in name and name.startswith(("http:","https:")):return ""
     return name
 
+def cloud_model():
+    """Opt-in signed-in Ollama daemon cloud model, never treated as local."""
+    name=os.getenv("DECLIC_OLLAMA_CLOUD_MODEL","").strip()
+    return name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,160}:cloud",name) else ""
+
 _request_mode=ContextVar("declic_ai_mode",default="hybrid")
 
 def mode():
@@ -42,7 +48,7 @@ def mode():
 
 @contextmanager
 def use_mode(value,consent=False):
-    if value not in ("hybrid","local","cloud"):raise ValueError("Unknown AI mode")
+    if value not in ("hybrid","local","cloud","ollama_cloud"):raise ValueError("Unknown AI mode")
     effective="local" if os.getenv("DECLIC_LOCAL_ONLY")=="1" or value=="local" else value if consent else "local" if value=="hybrid" and local_model() else "disabled"
     token=_request_mode.set(effective)
     try:yield effective
@@ -52,10 +58,10 @@ def local_only():
     return mode()=="local"
 
 def configured_modes():
-    cloud=any(os.getenv(k) for k in ("GEMINI_API_KEY","GEMEINI","OPENROUTER_API_KEY","OPENROUTER","BAZAARLINK_API_KEY","SOME"))
+    cloud=bool(cloud_model()) or any(os.getenv(k) for k in ("GEMINI_API_KEY","GEMEINI","OPENROUTER_API_KEY","OPENROUTER","BAZAARLINK_API_KEY","SOME"))
     local=bool(local_model())
-    if os.getenv("DECLIC_LOCAL_ONLY")=="1":return {"local":local,"cloud":False,"hybrid":False}
-    return {"local":local,"cloud":cloud,"hybrid":cloud and local}
+    if os.getenv("DECLIC_LOCAL_ONLY")=="1":return {"local":local,"cloud":False,"hybrid":False,**({"ollama_cloud":False} if cloud_model() else {})}
+    return {"local":local,"cloud":cloud,"hybrid":cloud and local,**({"ollama_cloud":True} if cloud_model() else {})}
 
 
 def local_timeout():
@@ -66,8 +72,11 @@ async def candidates(client):
     result=[]
     local=local_model()
     if mode()=='disabled':return result
+    if mode()=="ollama_cloud":
+        return [("ollama_cloud",cloud_model(),"")] if cloud_model() else []
     if local and mode()!='cloud':result.append(('ollama',local,''))
     if local_only():return result
+    if cloud_model():result.append(("ollama_cloud",cloud_model(),""))
     key=os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI")
     if key:
         try:
@@ -108,6 +117,12 @@ async def complete(client,provider,model,key,prompt,budget=3000):
         r=await client.post("http://127.0.0.1:11434/api/chat",timeout=local_timeout(),json={"model":model,"messages":[{"role":"user","content":prompt}],"stream":False,"format":"json","options":{"num_predict":budget,"num_ctx":4096,"temperature":0.3}})
         r.raise_for_status()
         return r.json()["message"]["content"]
+    if provider=="ollama_cloud":
+        # The signed-in desktop daemon authenticates remote inference. No API key,
+        # schema format or local context settings are forwarded from DÉCLIC.
+        r=await client.post("http://127.0.0.1:11434/api/chat",timeout=local_timeout(),json={"model":model,"messages":[{"role":"user","content":prompt}],"stream":False})
+        r.raise_for_status()
+        return r.json()["message"]["content"]
     if provider=="gemini":
         r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",headers={"x-goog-api-key":key},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.4,"maxOutputTokens":max(6000,budget),"responseMimeType":"application/json"}})
         r.raise_for_status()
@@ -136,6 +151,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
         router=[o for o in options if o[0]=="openrouter" and _ready(o[0],o[1])]
         bazaar=[o for o in options if o[0]=="bazaarlink" and _ready(o[0],o[1])]
         gemini=[o for o in options if o[0]=="gemini" and _ready(o[0],o[1])]
+        ollama_cloud=[o for o in options if o[0]=="ollama_cloud" and _ready(o[0],o[1])]
         reserve=bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER") or os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"))
         if reserve and (role=="review" or os.getenv("DECLIC_GEMINI_TEXT_FALLBACK","1")=="0"):
             gemini=[]
@@ -151,7 +167,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
         if len(second)>1:options.append(second[1])
         options.extend(gemini[:2])
         if not first and not second:options=gemini[:3]
-        options=local+options if local_only() else options+local
+        options=ollama_cloud if mode()=="ollama_cloud" else local+options if local_only() else options+ollama_cloud+local
         for provider,model,key in options[:max_candidates]:
             if not _ready(provider,model):continue
             try:
@@ -167,7 +183,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
 
 async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
     try:
-        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if local_model() and mode()!='cloud' else 50)
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if (local_model() and mode()!='cloud') or (cloud_model() and not local_only() and mode()!='disabled') else 50)
     except asyncio.TimeoutError:
         log.warning("Provider routing deadline exceeded role=%s",role)
         return None
@@ -178,7 +194,7 @@ async def provider_status():
     modes=configured_modes()
     model=local_model()
     local={"configured":bool(model),"model":model or None,"reachable":False,"installed":False}
-    if model:
+    if model or cloud_model():
         try:
             async with httpx.AsyncClient(timeout=3,trust_env=False) as client:
                 response=await client.get("http://127.0.0.1:11434/api/tags")
@@ -188,7 +204,9 @@ async def provider_status():
                 names={model,model+":latest"} if ":" not in model else {model}
                 local["installed"]=any(t.get("name") in names and not t.get("remote_model") and not t.get("remote_host") for t in tags if isinstance(t,dict))
         except (httpx.HTTPError,ValueError,TypeError,AttributeError):pass
-    return {"modes":modes,"providers":{"ollama":local,
+    providers={"ollama":local,
         "gemini":{"configured":bool(os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI"))},
         "openrouter":{"configured":bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER"))},
-        "bazaarlink":{"configured":bool(os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"))}}}
+        "bazaarlink":{"configured":bool(os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"))}}
+    if cloud_model():providers["ollama_cloud"]={"configured":True,"model":cloud_model(),"reachable":local["reachable"],"authenticated":None}
+    return {"modes":modes,"providers":providers}

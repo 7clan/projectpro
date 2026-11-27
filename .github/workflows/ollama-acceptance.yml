@@ -1,0 +1,94 @@
+name: Ollama local audiovisual acceptance
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/ollama-acceptance.yml']
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      DECLIC_REQUIRE_NEURAL: '1'
+      DECLIC_LOCAL_ONLY: "1"
+      DECLIC_OLLAMA_MODEL: qwen2.5:3b-instruct
+      DECLIC_OLLAMA_TIMEOUT: "240"
+      OLLAMA_NO_CLOUD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt -r requirements-voice.txt playwright
+      - run: mkdir -p voices && python -m piper.download_voices --data-dir voices fr_FR-siwis-medium en_US-lessac-medium
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng pulseaudio pulseaudio-utils xvfb xauth
+      - run: env -u DECLIC_LOCAL_ONLY -u DECLIC_OLLAMA_MODEL python -m pytest -q && node --check app/static/studio.js
+      - name: Install and start real local Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          if ! curl -fsS http://127.0.0.1:11434/api/version; then
+            nohup ollama serve >/tmp/ollama.log 2>&1 &
+          fi
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:11434/api/version && break; sleep 1; done
+          ollama pull "$DECLIC_OLLAMA_MODEL"
+          ollama list
+          ollama --version
+      - name: Real local text inference smoke test
+        run: |
+          mkdir -p acceptance
+          python - <<'PY'
+          import asyncio,json,pathlib,time
+          from app.providers import route
+          def validate(raw):
+              d=json.loads(raw)
+              assert d.get("answer")==25, d
+              return d
+          started=time.monotonic()
+          result=asyncio.run(route('Return JSON only with integer answer for 3 squared plus 4 squared: {"answer":25}',validate,budget=100,role="coach"))
+          assert result and result[1]=="ollama",result
+          print("PASS: actual local Ollama inference",result,round(time.monotonic()-started,2))
+          pathlib.Path("acceptance/local-text.json").write_text(json.dumps({"result":result,"seconds":time.monotonic()-started}))
+          PY
+      - name: Generate neural and legacy voice samples
+        run: |
+          mkdir -p acceptance
+          python - <<'PY'
+          import asyncio, pathlib, json
+          from app.voice import synthesize, synthesize_preferred
+          async def main():
+              text='Observons ce triangle rectangle. Les carrés construits sur les deux petits côtés ont ensemble la même aire que le grand carré.'
+              audio,marks,backend=await synthesize_preferred(text,'fr',[0,.45,.7])
+              assert backend=='piper-neural',backend
+              pathlib.Path('acceptance/neural-french.wav').write_bytes(audio)
+              pathlib.Path('acceptance/neural-cues.json').write_text(json.dumps(marks))
+              old,_=await synthesize(text,'fr',[0,.45,.7])
+              pathlib.Path('acceptance/legacy-french.wav').write_bytes(old)
+              print('PASS: neural French narration and actual sample timestamps')
+          asyncio.run(main())
+          PY
+      - name: Record actual Chrome window and audio together
+        run: |
+          mkdir -p acceptance
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/studio.log 2>&1 &
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
+          xvfb-run -a -s "-screen 0 1440x900x24" env PYTHONPATH=. python scripts/record_acceptance.py
+      - name: Inspect captured audio streams
+        if: always()
+        run: |
+          for f in acceptance/*.mp4; do
+            [ -f "$f" ] || continue
+            ffmpeg -hide_banner -i "$f" -af volumedetect -vn -f null - 2>"${f%.mp4}.audio.txt"
+            grep -E 'mean_volume|max_volume' "${f%.mp4}.audio.txt" || true
+          done
+      - name: Safe provider diagnostics
+        if: always()
+        run: grep -E 'Provider .*failed|AI route success|routing deadline' /tmp/studio.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-ollama-audiovisual-evidence
+          path: acceptance/

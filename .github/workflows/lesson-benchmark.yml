@@ -19,7 +19,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements-dev.txt
       - run: sudo apt-get update && sudo apt-get install -y espeak-ng
-      - run: pytest -q tests/test_providers.py tests/test_voice_review.py tests/test_whiteboard.py
+      - run: python -m pytest -q tests/test_providers.py tests/test_voice_review.py tests/test_whiteboard.py
       - name: Generate and examine synthetic lessons
         run: |
           mkdir -p benchmark

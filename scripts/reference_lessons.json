@@ -1,0 +1,555 @@
+{
+  "geometry": {
+    "steps": [
+      {
+        "title": "Un triangle, trois longueurs",
+        "formula": "3² + 4² = 5²",
+        "narration": "Partons d'un triangle rectangle. Les deux côtés de l'angle droit mesurent trois et quatre unités. Observe que l'hypoténuse, en violet, mesure cinq unités.",
+        "objects": [
+          {
+            "kind": "polygon",
+            "points": [
+              [
+                255,
+                150
+              ],
+              [
+                255,
+                90
+              ],
+              [
+                335,
+                150
+              ]
+            ],
+            "color": "purple",
+            "motion": "grow",
+            "at": 0,
+            "fill": 0.12,
+            "width": 2.5,
+            "duration": 0.9
+          },
+          {
+            "kind": "line",
+            "x": 255,
+            "y": 90,
+            "x2": 255,
+            "y2": 150,
+            "color": "blue",
+            "motion": "draw",
+            "at": 0.25,
+            "width": 2.5,
+            "duration": 0.8
+          },
+          {
+            "kind": "line",
+            "x": 255,
+            "y": 150,
+            "x2": 335,
+            "y2": 150,
+            "color": "green",
+            "motion": "draw",
+            "at": 0.25,
+            "width": 2.5,
+            "duration": 0.8
+          },
+          {
+            "kind": "line",
+            "x": 255,
+            "y": 90,
+            "x2": 335,
+            "y2": 150,
+            "color": "purple",
+            "motion": "draw",
+            "at": 0.65,
+            "width": 2.5,
+            "duration": 0.8
+          },
+          {
+            "kind": "polyline",
+            "points": [
+              [
+                255,
+                138
+              ],
+              [
+                267,
+                138
+              ],
+              [
+                267,
+                150
+              ]
+            ],
+            "color": "ink",
+            "motion": "draw",
+            "at": 0.25,
+            "width": 2
+          },
+          {
+            "kind": "text",
+            "x": 235,
+            "y": 121,
+            "text": "3",
+            "size": 19,
+            "color": "blue",
+            "motion": "fade",
+            "at": 0.25
+          },
+          {
+            "kind": "text",
+            "x": 295,
+            "y": 174,
+            "text": "4",
+            "size": 19,
+            "color": "green",
+            "motion": "fade",
+            "at": 0.25
+          },
+          {
+            "kind": "text",
+            "x": 315,
+            "y": 106,
+            "text": "5",
+            "size": 19,
+            "color": "purple",
+            "motion": "fade",
+            "at": 0.65
+          },
+          {
+            "kind": "text",
+            "x": 295,
+            "y": 245,
+            "text": "Angle droit : 90°",
+            "size": 16,
+            "color": "muted",
+            "motion": "fade",
+            "at": 0.25
+          },
+          {
+            "kind": "text",
+            "x": 300,
+            "y": 283,
+            "text": "Hypoténuse = côté opposé à l’angle droit",
+            "size": 17,
+            "color": "purple",
+            "motion": "fade",
+            "at": 0.65
+          }
+        ]
+      },
+      {
+        "title": "Les aires s’additionnent",
+        "formula": "9 + 16 = 25",
+        "narration": "Construisons un carré sur chaque côté. Le carré bleu a une aire de neuf et le vert une aire de seize. Ensemble, ils ont exactement l'aire du carré violet : vingt-cinq.",
+        "objects": [
+          {
+            "kind": "polygon",
+            "points": [
+              [
+                255,
+                90
+              ],
+              [
+                195,
+                90
+              ],
+              [
+                195,
+                150
+              ],
+              [
+                255,
+                150
+              ]
+            ],
+            "color": "blue",
+            "motion": "grow",
+            "at": 0.2,
+            "fill": 0.24,
+            "width": 2.5,
+            "duration": 0.9
+          },
+          {
+            "kind": "polygon",
+            "points": [
+              [
+                255,
+                150
+              ],
+              [
+                335,
+                150
+              ],
+              [
+                335,
+                230
+              ],
+              [
+                255,
+                230
+              ]
+            ],
+            "color": "green",
+            "motion": "grow",
+            "at": 0.35,
+            "fill": 0.24,
+            "width": 2.5,
+            "duration": 0.9
+          },
+          {
+            "kind": "polygon",
+            "points": [
+              [
+                255,
+                90
+              ],
+              [
+                315,
+                10
+              ],
+              [
+                395,
+                70
+              ],
+              [
+                335,
+                150
+              ]
+            ],
+            "color": "purple",
+            "motion": "grow",
+            "at": 0.65,
+            "fill": 0.22,
+            "width": 2.5,
+            "duration": 0.9
+          },
+          {
+            "kind": "polygon",
+            "points": [
+              [
+                255,
+                150
+              ],
+              [
+                255,
+                90
+              ],
+              [
+                335,
+                150
+              ]
+            ],
+            "color": "ink",
+            "motion": "draw",
+            "at": 0,
+            "fill": 0.08,
+            "width": 2.5,
+            "duration": 0.9
+          },
+          {
+            "kind": "text",
+            "x": 225,
+            "y": 125,
+            "text": "9",
+            "size": 23,
+            "color": "blue",
+            "motion": "fade",
+            "at": 0.2
+          },
+          {
+            "kind": "text",
+            "x": 295,
+            "y": 196,
+            "text": "16",
+            "size": 23,
+            "color": "green",
+            "motion": "fade",
+            "at": 0.35
+          },
+          {
+            "kind": "text",
+            "x": 325,
+            "y": 83,
+            "text": "25",
+            "size": 23,
+            "color": "purple",
+            "motion": "fade",
+            "at": 0.65
+          },
+          {
+            "kind": "rect",
+            "x": 78,
+            "y": 252,
+            "w": 444,
+            "h": 54,
+            "color": "muted",
+            "motion": "fade",
+            "at": 0.65,
+            "fill": 0.06,
+            "width": 2.5
+          },
+          {
+            "kind": "text",
+            "x": 300,
+            "y": 285,
+            "text": "9 + 16 = 25 unités²",
+            "size": 22,
+            "color": "ink",
+            "motion": "fade",
+            "at": 0.65
+          }
+        ]
+      }
+    ]
+  },
+  "physics": {
+    "steps": [
+      {
+        "title": "Une force nette crée une accélération",
+        "formula": "F = m × a",
+        "narration": "Voici un objet de deux kilogrammes sur une surface idéale sans frottement. Une force nette de six newtons agit vers la droite. La masse résiste à l'accélération, mais la force la fait accélérer.",
+        "objects": [
+          {
+            "kind": "line",
+            "x": 54,
+            "y": 230,
+            "x2": 550,
+            "y2": 230,
+            "color": "muted",
+            "motion": "draw",
+            "at": 0,
+            "width": 2.5,
+            "duration": 0.8
+          },
+          {
+            "kind": "rect",
+            "x": 132,
+            "y": 122,
+            "w": 144,
+            "h": 91,
+            "color": "blue",
+            "motion": "grow",
+            "at": 0,
+            "fill": 0.16,
+            "width": 2.5
+          },
+          {
+            "kind": "circle",
+            "x": 163,
+            "y": 219,
+            "r": 11,
+            "color": "ink",
+            "motion": "grow",
+            "at": 0,
+            "fill": 0.7,
+            "width": 2
+          },
+          {
+            "kind": "circle",
+            "x": 245,
+            "y": 219,
+            "r": 11,
+            "color": "ink",
+            "motion": "grow",
+            "at": 0,
+            "fill": 0.7,
+            "width": 2
+          },
+          {
+            "kind": "text",
+            "x": 204,
+            "y": 172,
+            "text": "2 kg",
+            "size": 24,
+            "color": "blue",
+            "motion": "fade",
+            "at": 0
+          },
+          {
+            "kind": "arrow",
+            "x": 282,
+            "y": 161,
+            "x2": 478,
+            "y2": 161,
+            "color": "orange",
+            "motion": "draw",
+            "at": 0.4,
+            "width": 4,
+            "duration": 1
+          },
+          {
+            "kind": "text",
+            "x": 383,
+            "y": 144,
+            "text": "F = 6 N",
+            "size": 21,
+            "color": "orange",
+            "motion": "fade",
+            "at": 0.4
+          },
+          {
+            "kind": "arrow",
+            "x": 282,
+            "y": 199,
+            "x2": 410,
+            "y2": 199,
+            "color": "green",
+            "motion": "draw",
+            "at": 0.7,
+            "width": 4,
+            "duration": 1
+          },
+          {
+            "kind": "text",
+            "x": 386,
+            "y": 222,
+            "text": "a = 3 m/s²",
+            "size": 18,
+            "color": "green",
+            "motion": "fade",
+            "at": 0.7
+          },
+          {
+            "kind": "text",
+            "x": 300,
+            "y": 65,
+            "text": "Force nette → accélération",
+            "size": 21,
+            "color": "ink",
+            "motion": "fade",
+            "at": 0
+          }
+        ]
+      },
+      {
+        "title": "Le déplacement augmente de plus en plus vite",
+        "formula": "x = ½at² ; a = 3 m/s²",
+        "narration": "En partant du repos, après une seconde l'objet a parcouru un mètre et demi. Après deux secondes, il a parcouru six mètres. L'espacement augmente : c'est le signe d'une vitesse qui augmente.",
+        "objects": [
+          {
+            "kind": "line",
+            "x": 60,
+            "y": 208,
+            "x2": 540,
+            "y2": 208,
+            "color": "muted",
+            "motion": "draw",
+            "at": 0,
+            "width": 2.5,
+            "duration": 0.8
+          },
+          {
+            "kind": "arrow",
+            "x": 75,
+            "y": 208,
+            "x2": 520,
+            "y2": 208,
+            "color": "ink",
+            "motion": "draw",
+            "at": 0,
+            "width": 4,
+            "duration": 1
+          },
+          {
+            "kind": "circle",
+            "x": 100,
+            "y": 186,
+            "r": 15,
+            "color": "blue",
+            "motion": "grow",
+            "at": 0,
+            "fill": 0.35,
+            "width": 2
+          },
+          {
+            "kind": "circle",
+            "x": 190,
+            "y": 186,
+            "r": 15,
+            "color": "cyan",
+            "motion": "grow",
+            "at": 0.35,
+            "fill": 0.35,
+            "width": 2
+          },
+          {
+            "kind": "circle",
+            "x": 460,
+            "y": 186,
+            "r": 15,
+            "color": "green",
+            "motion": "grow",
+            "at": 0.7,
+            "fill": 0.35,
+            "width": 2
+          },
+          {
+            "kind": "text",
+            "x": 100,
+            "y": 245,
+            "text": "0 s · 0 m",
+            "size": 15,
+            "color": "blue",
+            "motion": "fade",
+            "at": 0
+          },
+          {
+            "kind": "text",
+            "x": 190,
+            "y": 270,
+            "text": "1 s · 1,5 m",
+            "size": 15,
+            "color": "cyan",
+            "motion": "fade",
+            "at": 0.35
+          },
+          {
+            "kind": "text",
+            "x": 460,
+            "y": 245,
+            "text": "2 s · 6 m",
+            "size": 15,
+            "color": "green",
+            "motion": "fade",
+            "at": 0.7
+          },
+          {
+            "kind": "arrow",
+            "x": 105,
+            "y": 145,
+            "x2": 180,
+            "y2": 145,
+            "color": "blue",
+            "motion": "draw",
+            "at": 0.35,
+            "width": 4,
+            "duration": 1
+          },
+          {
+            "kind": "arrow",
+            "x": 200,
+            "y": 145,
+            "x2": 450,
+            "y2": 145,
+            "color": "green",
+            "motion": "draw",
+            "at": 0.7,
+            "width": 4,
+            "duration": 1
+          },
+          {
+            "kind": "text",
+            "x": 300,
+            "y": 65,
+            "text": "Même intervalle, distance croissante",
+            "size": 20,
+            "color": "ink",
+            "motion": "fade",
+            "at": 0
+          }
+        ]
+      }
+    ]
+  }
+}

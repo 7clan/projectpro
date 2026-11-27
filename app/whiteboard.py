@@ -189,11 +189,18 @@ def validate_compact(raw):
     return validate_board(json.dumps({"steps":steps},ensure_ascii=False))
 
 def validate_lesson(raw):
-    from .numerical_checks import validate_checks
+    from .numerical_checks import validate_checks, verify_formula
     steps=validate_compact(raw)
     start,end=raw.find("{"),raw.rfind("}")
     data=json.loads(raw[start:end+1])
     checks=validate_checks(data.get("checks",[]))
+    for step in steps:
+        visible=verify_formula(step["formula"])
+        if visible:checks.append(visible)
+        for obj in step["objects"]:
+            if obj["kind"]=="text":
+                visible=verify_formula(obj["text"])
+                if visible:checks.append(visible)
     return steps,checks
 
 async def generate(question, lang, sources, history):

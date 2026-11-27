@@ -30,7 +30,14 @@ with sync_playwright() as p:
             page.locator("#demo-login").click()
             wait_for(page,"document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter') || document.querySelector('#ai-mode').textContent.includes('bazaarlink') || document.querySelector('#ai-mode').textContent.includes('ollama')")
             page.locator('[data-view="studio"]').click()
-            page.locator("#studio-ai-mode").select_option("cloud")
+            # In cloud-only CI the app correctly disables the sole-mode selector.
+            # Do not bypass the UI: verify its selected mode or select it when enabled.
+            wait_for(page,"document.querySelector('#studio-ai-mode').value==='cloud' || (!document.querySelector('#studio-ai-mode').disabled && !document.querySelector('#studio-ai-mode option[value=cloud]').disabled)")
+            if page.locator("#studio-ai-mode").input_value()!="cloud":
+                page.locator("#studio-ai-mode").select_option("cloud")
+            assert page.locator("#studio-ai-mode").input_value()=="cloud"
+            if page.evaluate("state.language")!="en":page.locator("#language").click()
+            assert page.evaluate("state.language")=="en"
             if os.getenv("DECLIC_LOCAL_ONLY")!="1":page.locator("#studio-consent").check()
             else:page.locator("#studio-consent").uncheck()
             # Avoid spending speech quota on autoplay before recording.

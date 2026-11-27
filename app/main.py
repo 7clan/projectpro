@@ -531,6 +531,11 @@ async def studio_review(payload:StudioReviewRequest,user=Depends(user_from_token
 @app.delete('/api/documents/{document_id}')
 def delete_document(document_id:str,user=Depends(user_from_token)):
     with db() as con:
+        # Quiz snapshots may contain course excerpts: remove them on document deletion.
+        import json
+        for q in con.execute('SELECT id,questions FROM quizzes WHERE user_id=?',(user['id'],)).fetchall():
+            if any(x.get('document_id')==document_id for x in json.loads(q['questions'])):
+                con.execute('DELETE FROM quizzes WHERE id=?',(q['id'],))
         result=con.execute('DELETE FROM documents WHERE id=? AND user_id=?',(document_id,user['id']))
         if not result.rowcount: raise HTTPException(404,'Document introuvable')
     return {'deleted':True}
@@ -543,3 +548,7 @@ def delete_account(user=Depends(user_from_token)):
             con.execute(f'DELETE FROM {table} WHERE user_id=?',(uid,))
         con.execute('DELETE FROM users WHERE id=?',(uid,))
     return {'deleted':True}
+
+
+from .course_tools import install as install_course_tools
+install_course_tools(app,user_from_token)

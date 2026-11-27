@@ -5,6 +5,8 @@ import logging
 import time
 import math
 import httpx
+from contextvars import ContextVar
+from contextlib import contextmanager
 
 log=logging.getLogger(__name__)
 
@@ -33,8 +35,28 @@ def local_model():
     if not name or "cloud" in name.casefold() or "/" in name and name.startswith(("http:","https:")):return ""
     return name
 
+_request_mode=ContextVar("declic_ai_mode",default="hybrid")
+
+def mode():
+    return "local" if os.getenv("DECLIC_LOCAL_ONLY")=="1" else _request_mode.get()
+
+@contextmanager
+def use_mode(value,consent=False):
+    if value not in ("hybrid","local","cloud"):raise ValueError("Unknown AI mode")
+    effective="local" if os.getenv("DECLIC_LOCAL_ONLY")=="1" or value=="local" else value if consent else "local" if value=="hybrid" and local_model() else "disabled"
+    token=_request_mode.set(effective)
+    try:yield effective
+    finally:_request_mode.reset(token)
+
 def local_only():
-    return os.getenv("DECLIC_LOCAL_ONLY")=="1"
+    return mode()=="local"
+
+def configured_modes():
+    cloud=any(os.getenv(k) for k in ("GEMINI_API_KEY","GEMEINI","OPENROUTER_API_KEY","OPENROUTER","BAZAARLINK_API_KEY","SOME"))
+    local=bool(local_model())
+    if os.getenv("DECLIC_LOCAL_ONLY")=="1":return {"local":local,"cloud":False,"hybrid":False}
+    return {"local":local,"cloud":cloud,"hybrid":cloud and local}
+
 
 def local_timeout():
     try:return max(30,min(300,int(os.getenv("DECLIC_OLLAMA_TIMEOUT","180"))))
@@ -43,8 +65,9 @@ def local_timeout():
 async def candidates(client):
     result=[]
     local=local_model()
-    if local:result.append(('ollama',local,''))
-    if os.getenv('DECLIC_LOCAL_ONLY')=='1':return result
+    if mode()=='disabled':return result
+    if local and mode()!='cloud':result.append(('ollama',local,''))
+    if local_only():return result
     key=os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI")
     if key:
         try:
@@ -128,7 +151,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
         if len(second)>1:options.append(second[1])
         options.extend(gemini[:2])
         if not first and not second:options=gemini[:3]
-        options=local+options if os.getenv("DECLIC_LOCAL_ONLY")=="1" else options+local
+        options=local+options if local_only() else options+local
         for provider,model,key in options[:max_candidates]:
             if not _ready(provider,model):continue
             try:

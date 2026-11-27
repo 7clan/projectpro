@@ -50,6 +50,8 @@ async def generate_local(question,lang,sources,history):
             r=await client.post("http://127.0.0.1:11434/api/chat",json={"model":model,"stream":False,"format":SCHEMA,"messages":[{"role":"user","content":prompt}],"options":{"temperature":0,"num_ctx":4096,"num_predict":800}})
             r.raise_for_status()
             steps,checks=compile_plan(r.json()["message"]["content"])
+            from .numerical_checks import verify_subject_labels
+            checks.extend(verify_subject_labels(steps,question))
         return {"mode":"live_ai","visual_mode":"generated","provider":"ollama","model":model,"steps":steps,"numerical_checks":checks,"sources":sources,"notice":"IA locale · schémas paramétriques · contenu à vérifier" if lang=="fr" else "Local AI · parametric diagrams · verify content"}
     except (httpx.HTTPError,ValueError,TypeError,KeyError,IndexError):
         return None

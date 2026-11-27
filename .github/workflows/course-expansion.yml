@@ -1,0 +1,51 @@
+name: Course expansion and deployment evidence
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/course-expansion.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt playwright
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng espeak-ng
+      - run: python -m pytest -q && node --check app/static/app.js && node --check app/static/studio.js && node --check app/static/course-tools.js
+      - run: python -m playwright install --with-deps chromium
+      - name: Real browser journey
+        run: |
+          mkdir -p expansion-evidence
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >expansion-evidence/server.log 2>&1 &
+          for i in $(seq 1 60); do curl --silent --fail http://127.0.0.1:8000/api/health && break; sleep .5; done
+          python scripts/course_expansion_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-course-expansion-evidence
+          path: expansion-evidence/
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up --build -d
+      - name: Verify real container startup and persistence
+        run: |
+          set -eu
+          for i in $(seq 1 90); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8000/api/health
+          docker compose exec -T declic sh -c 'test "$(id -u)" = "10001" && tesseract --list-langs | grep fra'
+          TOKEN=$(curl -fsS -X POST http://127.0.0.1:8000/api/auth/demo | python -c "import json,sys;print(json.load(sys.stdin)['token'])")
+          curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/me >/dev/null
+          docker compose restart declic
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
+          curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/me >/dev/null
+          echo "PASS: non-root container, OCR and persisted session across restart"
+      - if: always()
+        run: docker compose down -v

@@ -169,7 +169,7 @@ def homepage():
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'0.1.0','calculation_engine':'deterministic','ai':ai_status()}
+    return {'status':'ok','version':'0.1.0','calculation_engine':'deterministic','ai':{**ai_status(),'local_only':local_generation_allowed()}}
 
 
 @app.post('/api/auth/register', status_code=201)

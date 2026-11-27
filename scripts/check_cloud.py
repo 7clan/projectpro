@@ -26,7 +26,7 @@ async def probe(provider):
     started=time.monotonic()
     model=""
     try:
-        async with httpx.AsyncClient(timeout=35,trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=25,trust_env=False) as client:
             prompt="Respond with exactly the word OK. Do not explain."
             if provider=="gemini":
                 base="https://generativelanguage.googleapis.com/v1beta/"
@@ -35,16 +35,16 @@ async def probe(provider):
                 response.raise_for_status()
                 models=[m["name"] for m in response.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[]) and "flash" in m["name"] and not any(x in m["name"] for x in ("image","audio","tts","live","thinking"))]
                 if not models:return "gemini: AUTHENTICATED, no compatible Flash text model discovered"
-                model=max(models,key=lambda m:("3.6-flash" in m,"3.5-flash-lite" in m,"lite" in m,"latest" not in m,"preview" not in m))
-                response=await client.post(base+model+":generateContent",headers=headers,json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":1024}})
+                model=next((m for m in models if m.endswith("/gemini-flash-latest")),models[0])
+                response=await client.post(base+model+":generateContent",headers=headers,json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":256}})
                 response.raise_for_status()
                 reply=" ".join(p.get("text","") for c in response.json().get("candidates",[]) for p in c.get("content",{}).get("parts",[]) if not p.get("thought"))
             else:
-                model="openrouter/free" if provider=="openrouter" else "qwen/qwen3.7-flash"
+                model="openrouter/free" if provider=="openrouter" else "auto:free"
                 base="https://openrouter.ai/api/v1" if provider=="openrouter" else "https://api.bazaarlink.ai/v1"
                 headers={"Authorization":"Bearer "+key}
                 if provider=="bazaarlink":headers["X-Free-Fallback"]="false"
-                response=await client.post(base+"/chat/completions",headers=headers,json={"model":model,"messages":[{"role":"user","content":prompt}],"max_tokens":1024})
+                response=await client.post(base+"/chat/completions",headers=headers,json={"model":model,"messages":[{"role":"user","content":prompt}],"max_tokens":128})
                 response.raise_for_status()
                 data=response.json()
                 reply=data["choices"][0]["message"].get("content") or ""

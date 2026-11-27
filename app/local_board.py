@@ -11,23 +11,11 @@ def requested_diagram(question):
     import re
     q=question.casefold()
     if "pythagor" in q:
-        # A stated pair of perpendicular legs determines the hypotenuse.
-        # Preserve the triple case first, so an inconsistent triple cannot
-        # silently be reinterpreted as a valid pair.
-        prefix=r"(?:rectangle|triangle|sides|legs|côtés(?:\s+perpendiculaires)?)\s+(?:(?:of|de)\s+)?(?:lengths?\s+|longueurs?\s+|côtés\s+)?"
-        number=r"(\d+(?:\.\d+)?)"
-        separator=r"(?:\s*[,;]\s*(?:(?:and|et)\s+)?|\s+(?:and|et)\s+)"
-        match=re.search(prefix+number+separator+number+separator+number+r"\b",q)
+        # Explicit 3, 4, 5 style triples only, not arbitrary numbers elsewhere.
+        match=re.search(r"(?:rectangle|triangle|sides|côtés)\s+(?:de\s+côtés\s+)?(\d+(?:\.\d+)?)\s*[,;]\s*(\d+(?:\.\d+)?)\s*(?:[,;]\s*(?:(?:and|et)\s+)?|(?:and|et)\s+)(\d+(?:\.\d+)?)\b",q)
         if match:
             x,y,z=map(float,match.groups())
-            if .1<=x<=100 and .1<=y<=100 and abs(x*x+y*y-z*z)<.0001:
-                return "triangle",{"a":x,"b":y}
-            return "triangle",{}
-        pair=re.search(prefix+number+separator+number+r"\b",q)
-        if pair:
-            x,y=map(float,pair.groups())
-            if .1<=x<=100 and .1<=y<=100:
-                return "triangle",{"a":x,"b":y}
+            if abs(x*x+y*y-z*z)<.0001:return "triangle",{"a":x,"b":y}
         return "triangle",{}
     if "newton" in q and any(k in q for k in ("deuxième","seconde","second","2e","2nd","2ème")):
         mass=re.search(r"(\d+(?:[.,]\d+)?)\s*kg\b",q)

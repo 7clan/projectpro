@@ -215,3 +215,14 @@ def test_mixed_scan_with_native_header(client,auth,monkeypatch):
     assert r.json()["extraction"][0]["method"]=="mixed_ocr"
     content=client.get("/api/documents/"+r.json()["id"]+"/pages/0/text",headers=auth).json()["content"]
     assert "Page 1" in content and "Acceleration" in content
+
+
+def test_independent_subject_relationships_and_review():
+    from app.numerical_checks import verify_subject_labels
+    from app.reviewer import review
+    scene={"formula":"U = R × I","objects":[{"kind":"text","text":x} for x in ["U = 12 V","R = 6 Ω","I = 2 A"]]}
+    assert verify_subject_labels([scene],"Loi d'Ohm")
+    scene["objects"][2]["text"]="I = 3 A"
+    with pytest.raises(ValueError):verify_subject_labels([scene],"Loi d'Ohm")
+    result=asyncio.run(review("Loi d'Ohm",[scene],"author-model"))
+    assert result["verdict"]=="revise" and result["provider"]=="deterministic"

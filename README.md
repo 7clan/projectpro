@@ -209,7 +209,7 @@ Reopen Live Studio, choose **Piper · local**, and select an installed **Voice p
 Kokoro provides three English candidates (Heart, Bella and Michael). It is independent of Ollama and cloud APIs. Existing Piper and cloud voices remain unchanged. Install only if you want to try these voices:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install kokoro-onnx==0.5.0
+.\.venv\Scripts\python.exe -m pip install kokoro-onnx==0.6.0
 New-Item -ItemType Directory -Force voices\kokoro | Out-Null
 curl.exe -fL --retry 2 https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx -o voices/kokoro/kokoro-v1.0.onnx
 curl.exe -fL --retry 2 https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin -o voices/kokoro/voices-v1.0.bin

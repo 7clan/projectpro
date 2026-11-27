@@ -75,9 +75,53 @@ from functools import lru_cache
 _VOICE_LOCK=threading.Lock()
 _VOICE_NAMES={"fr":"fr_FR-siwis-medium","en":"en_US-lessac-medium"}
 _EXTRA_VOICES={"en_US-amy-medium":"en","en_US-ryan-medium":"en","en_GB-alba-medium":"en","fr_FR-tom-medium":"fr"}
+_KOKORO_VOICES={"kokoro-heart":"af_heart","kokoro-bella":"af_bella","kokoro-michael":"am_michael"}
+def _kokoro_paths():
+    directory=Path(os.getenv("DECLIC_KOKORO_DIR",str(Path(__file__).resolve().parents[1]/"voices"/"kokoro")))
+    return directory/"kokoro-v1.0.onnx",directory/"voices-v1.0.bin"
+
+def _kokoro_available():
+    import importlib.util
+    return all(p.is_file() for p in _kokoro_paths()) and importlib.util.find_spec("kokoro_onnx") is not None
+
+@lru_cache(maxsize=1)
+def _kokoro_model(model_path,voices_path):
+    import onnxruntime as ort
+    from kokoro_onnx import Kokoro
+    # Bound CPU threads to avoid competing with the browser on a small laptop.
+    options=ort.SessionOptions()
+    options.intra_op_num_threads=2
+    options.inter_op_num_threads=1
+    session=ort.InferenceSession(model_path,sess_options=options,providers=["CPUExecutionProvider"])
+    return Kokoro.from_session(session,voices_path)
+
+def _kokoro_render(text,lang,cues,voice_name):
+    import numpy as np
+    if not _kokoro_available():raise FileNotFoundError("Kokoro voice model not installed")
+    chunks=split_cues(text,cues)
+    # Keep longer phrases for prosody; all original cue keys remain represented.
+    while len(chunks)>1 and (len(chunks)>3 or any(len(x[0].split())<6 for x in chunks)):
+        i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
+        a,aa=chunks[i];b,bb=chunks[i+1]
+        chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
+    output=io.BytesIO();marks=[];offset=0
+    with _VOICE_LOCK:
+        model=_kokoro_model(*(str(p) for p in _kokoro_paths()))
+        with wave.open(output,"wb") as w:
+            w.setnchannels(1);w.setsampwidth(2);w.setframerate(24000)
+            for fragment,positions in chunks:
+                samples,rate=model.create(fragment,voice=_KOKORO_VOICES[voice_name],speed=1.0,lang="en-us")
+                samples=np.asarray(samples,dtype=np.float32).reshape(-1)
+                if rate!=24000 or samples.size<2400 or not np.isfinite(samples).all() or np.max(np.abs(samples))<.001:
+                    raise ValueError("Invalid Kokoro audio")
+                raw=(np.clip(samples,-1,1)*32767).astype("<i2").tobytes()
+                marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
+                w.writeframes(raw);offset+=samples.size
+    return output.getvalue(),marks
+
 def voice_choices():
     directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
-    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]
+    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]+[{"id":name,"lang":"en","installed":_kokoro_available()} for name in _KOKORO_VOICES]
 
 
 @lru_cache(maxsize=2)
@@ -127,6 +171,13 @@ async def synthesize_preferred(text,lang,cues,cloud=False,voice_name=None):
     cloud=cloud and os.getenv('DECLIC_LOCAL_ONLY')!='1'
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
+    if isinstance(voice_name,str) and voice_name in _KOKORO_VOICES:
+        if lang!="en":raise ValueError("Unsupported voice for lesson language")
+        try:
+            audio,marks=await asyncio.to_thread(_kokoro_render,text,lang,cues,voice_name)
+        except (ImportError,OSError,RuntimeError) as exc:
+            raise FileNotFoundError("Kokoro voice unavailable") from exc
+        return audio,marks,voice_name
     if voice_name is not None:
         if not isinstance(voice_name,str) or _EXTRA_VOICES.get(voice_name)!=lang:
             raise ValueError("Unsupported voice for lesson language")

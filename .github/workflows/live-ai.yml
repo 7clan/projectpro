@@ -1,0 +1,56 @@
+name: Live AI smoke test
+on:
+  push:
+    paths: ['.github/workflows/live-ai.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        key: [GEMINI_API_KEY, GEMINI_API_KEY_2, OPENROUTER_API_KEY, OPENROUTER2, GROQ_API_KEY]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Test provider without exposing credentials
+        env:
+          KEY_NAME: ${{ matrix.key }}
+          TEST_KEY: ${{ secrets[matrix.key] }}
+        run: |
+          python - <<'PY'
+          import os, asyncio, httpx
+          from app.ai import coach
+          from app.engine import Beam
+          name = os.environ['KEY_NAME']
+          key = os.environ.pop('TEST_KEY', '')
+          if not key:
+              print(name + ': NOT CONFIGURED')
+              raise SystemExit(0)
+          for k in ('GEMINI_API_KEY','OPENROUTER_API_KEY'):
+              os.environ.pop(k,None)
+          async def main():
+              if name.startswith('GROQ'):
+                  async with httpx.AsyncClient(timeout=25) as client:
+                      r = await client.post('https://api.groq.com/openai/v1/chat/completions', headers={'Authorization':'Bearer '+key}, json={'model':'openai/gpt-oss-20b','messages':[{'role':'user','content':'In French, ask a student one question about force equilibrium without giving the answer.'}],'max_completion_tokens':500})
+                  print(name + ': HTTP ' + str(r.status_code))
+                  if r.is_success:
+                      print('Groq direct API response: ' + ('PASS' if r.json()['choices'][0]['message'].get('content') else 'EMPTY'))
+                  else:
+                      raise SystemExit(1)
+                  return
+              provider = 'GEMINI_API_KEY' if name.startswith('GEMINI') else 'OPENROUTER_API_KEY'
+              os.environ[provider] = key
+              result = await coach('Pourquoi une charge répartie agit-elle au milieu de la poutre ?', Beam(8,12,2,2), 'fr', [{'title':'RDM2','page':0,'excerpt':'Une charge uniforme q sur L a une résultante qL au milieu.'}], False)
+              print(name + ': ' + result['mode'])
+              if result['mode'] != 'live_ai':
+                  raise SystemExit(1)
+              print('Coach returned nonempty live response: PASS')
+          asyncio.run(main())
+          PY

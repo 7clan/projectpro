@@ -30,17 +30,30 @@ Open **http://127.0.0.1:8000** and choose **Explorer la démo immédiatement**. 
 
 For the PDF reader, upload **`data/demo_rdm2.pdf`** from this repository. No external network or model key is necessary for the principal learning flow. Google Fonts are an optional enhancement; the interface falls back to system fonts offline.
 
-### Optional LLM coach
+### Enable live AI and neural speech locally
 
-Copy `.env.example` to `.env` and set `GEMINI_API_KEY` or `OPENROUTER_API_KEY`. The app reads **environment variables**, so load them in the shell before starting (the `.env` file is a template, not auto-loaded):
+GitHub Actions secrets do **not** transfer to your laptop. Set your own keys in the same terminal used to start the server. On Windows PowerShell:
 
-```bash
-export GEMINI_API_KEY="your-key"    # macOS/Linux
-# PowerShell: $env:GEMINI_API_KEY = "your-key"
-python -m uvicorn app.main:app --reload
+```powershell
+$env:GEMINI_API_KEY = "YOUR_GEMEINI_KEY"
+$env:OPENROUTER_API_KEY = "YOUR_OPENROUTER_KEY"
+$env:BAZAARLINK_API_KEY = "YOUR_SOME_KEY"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-If no key is provided or the provider fails, the UI transparently switches to **rule-based Socratic guidance**. Live AI is optional; **all numerical results are computed locally**, never trusted to the LLM. Do not commit credentials.
+To install offline French and English neural voices before starting:
+
+```powershell
+pip install -r requirements-voice.txt
+New-Item -ItemType Directory -Force voices
+python -m piper.download_voices --data-dir voices fr_FR-siwis-medium en_US-lessac-medium
+```
+
+On macOS/Linux use `export NAME="value"` instead of the PowerShell assignments. The `.env.example` file is a template; the application does not automatically load it. In Studio Live, enable external AI consent, keep generated animations and audio selected, then choose cloud speech or local Piper. Cloud voice tries Gemini, then the free HeyGen speech model via OpenRouter, then local Piper. The UI shows the actual backend. Free services may rate-limit requests.
+
+BazaarLink prefers original animations, OpenRouter handles short tutoring requests, and Gemini is a fallback for text. Set `DECLIC_GEMINI_TEXT_FALLBACK=0` to reserve Gemini for voice when other providers are configured. Never commit credentials. The deterministic mechanics grading works without API keys.
+
+See [neural voice setup](docs/NEURAL_VOICE.md).
 
 ## 4-minute live demonstration
 
@@ -108,8 +121,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for data flow, formulas, mode
 
 - Every user owns their PDFs, reading events and attempts. Every document/challenge endpoint checks ownership.
 - PDFs are stored locally in SQLite, with a 12 MB / 120 page limit. Session tokens expire after 3 days; passwords use salted PBKDF2-HMAC-SHA256.
-- Raw uploaded content may be sent **as selected excerpts to Gemini/OpenRouter only if a key is configured and the student explicitly consents when invoking the coach**. Refusing consent preserves the local guidance mode.
-- In this one-day proof of concept, accounts are local, data is **not encrypted at rest**, and there is no operator-managed deletion or consent flow. Do **not** use this build with sensitive real student data or expose it publicly unchanged.
+- Raw uploaded content may be sent **as selected excerpts to Gemini/OpenRouter/BazaarLink only if a key is configured and the student explicitly consents when invoking the coach**. Refusing consent preserves the local guidance mode.
+- In this one-day proof of concept, accounts are local, data is **not encrypted at rest**, and self-service account and document deletion are available, but there is no production-grade administrative consent workflow. Do **not** use this build with sensitive real student data or expose it publicly unchanged.
 - The learning score is a transparent heuristic, not a grade or academic risk prediction. The explanation checklist uses keywords and can be fooled.
 - Citation display indicates *retrieval provenance*, never automatic factual verification. Deterministic engineering results have priority.
 - The included beam simulator is for instruction, **not structural design or safety decisions**.

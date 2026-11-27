@@ -384,6 +384,28 @@ async def upload_document(file: UploadFile = File(...),subject: str = Form('RDM2
     return {'id':did,'title':title,'page_count':count,'indexed_pages':sum(bool(t.strip()) for _,t in pages),'extraction':[{'page':p,'method':m} for p,m in methods]}
 
 
+@app.post('/api/documents/{document_id}/pages/{page}/ocr')
+def retry_page_ocr(document_id:str,page:int,user=Depends(user_from_token)):
+    """Explicitly retry a deferred or unreadable page, without replacing native text."""
+    from .ocr import extract_pages
+    d=owned_doc(document_id,user['id'])
+    if not 0<=page<d['page_count']:raise HTTPException(404,'Page introuvable')
+    existing=one('SELECT content FROM document_pages WHERE document_id=? AND page=?',(document_id,page))
+    if existing and existing['content'].strip():
+        raise HTTPException(409,'Cette page contient déjà du texte indexé')
+    source=one('SELECT data FROM documents WHERE id=? AND user_id=?',(document_id,user['id']))
+    if not source:raise HTTPException(404,'Document introuvable')
+    with fitz.open(stream=source['data'],filetype='pdf') as pdf, fitz.open() as single:
+        single.insert_pdf(pdf,from_page=page,to_page=page)
+        pages,methods=extract_pages(single.tobytes(),max_ocr=1,deadline_seconds=10)
+    content=pages[0][1];method=methods[0][1]
+    with db() as con:
+        if not con.execute("UPDATE document_pages SET content=? WHERE document_id=? AND page=? AND EXISTS (SELECT 1 FROM documents WHERE id=? AND user_id=?)",(content,document_id,page,document_id,user['id'])).rowcount:
+            raise HTTPException(404,'Document introuvable')
+        con.execute("INSERT INTO page_extraction(document_id,page,method) VALUES(?,?,?) ON CONFLICT(document_id,page) DO UPDATE SET method=excluded.method",(document_id,page,method))
+    return {'page':page,'method':method,'content':content}
+
+
 @app.get('/api/documents/{document_id}/pdf')
 def download_document(document_id:str,user=Depends(user_from_token)):
     owned_doc(document_id,user['id'])

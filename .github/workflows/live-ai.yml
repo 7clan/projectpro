@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        key: [GEMINI_API_KEY, GEMINI_API_KEY_2, OPENROUTER_API_KEY, OPENROUTER2, GROQ_API_KEY]
+        key: [GEMINI_API_KEY, GEMINI_API_KEY_2, OPENROUTER_API_KEY, OPENROUTER, OPENROUTER2, GROQ_API_KEY]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

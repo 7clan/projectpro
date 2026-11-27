@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      DECLIC_REQUIRE_NEURAL: '1'
       GEMINI_API_KEY: ${{ secrets.GEMEINI }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
     steps:
@@ -17,10 +18,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r requirements-dev.txt playwright
+      - run: pip install -r requirements-dev.txt -r requirements-voice.txt playwright
+      - run: mkdir -p voices && python -m piper.download_voices --data-dir voices fr_FR-siwis-medium en_US-lessac-medium
       - run: python -m playwright install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng pulseaudio pulseaudio-utils xvfb xauth
       - run: python -m pytest -q && node --check app/static/studio.js
+      - name: Generate neural and legacy voice samples
+        run: |
+          mkdir -p acceptance
+          python - <<'PY'
+          import asyncio, pathlib, json
+          from app.voice import synthesize, synthesize_preferred
+          async def main():
+              text='Observons ce triangle rectangle. Les carrés construits sur les deux petits côtés ont ensemble la même aire que le grand carré.'
+              audio,marks,backend=await synthesize_preferred(text,'fr',[0,.45,.7])
+              assert backend=='piper-neural',backend
+              pathlib.Path('acceptance/neural-french.wav').write_bytes(audio)
+              pathlib.Path('acceptance/neural-cues.json').write_text(json.dumps(marks))
+              old,_=await synthesize(text,'fr',[0,.45,.7])
+              pathlib.Path('acceptance/legacy-french.wav').write_bytes(old)
+              print('PASS: neural French narration and actual sample timestamps')
+          asyncio.run(main())
+          PY
       - name: Record actual Chrome window and audio together
         run: |
           mkdir -p acceptance

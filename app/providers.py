@@ -51,8 +51,8 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     log.info("Model %s finish=%s content_length=%s",d.get("model",model),c.get("finish_reason"),len(c["message"].get("content") or ""))
     return c["message"].get("content") or ""
 
-async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10):
-    async with httpx.AsyncClient(timeout=30) as client:
+async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10):
+    async with httpx.AsyncClient(timeout=15) as client:
         options=[o for o in await candidates(client) if o[1]!=exclude_model][:max_candidates]
         # Two independent providers/models at most in flight. Never forward keys to unrelated hosts.
         async def try_one(option):
@@ -75,3 +75,11 @@ async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=1
                     if not task.done(): task.cancel()
                 await asyncio.gather(*tasks,return_exceptions=True)
     return None
+
+async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10):
+    # Cap the entire discovery + retry operation; cancellation cleans up in-flight tasks.
+    try:
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates),timeout=50)
+    except asyncio.TimeoutError:
+        log.warning("Provider routing deadline exceeded")
+        return None

@@ -1,8 +1,5 @@
 """Constrained animated RDM2 lessons. Model writes narration, never executable visuals."""
 import json
-import os
-import logging
-import httpx
 from .ai import ai_status
 
 SCENES = {
@@ -73,20 +70,12 @@ async def teach(question, beam, lang, sources, history, consent):
         "illustration":lesson["example"],"scenes":[{"scene":x["scene"],"formula":x["formula"],"guide":x["narration"]} for x in lesson["steps"]],
         "history":history,"retrieved_excerpts":[{"title":s["title"],"page":s["page"]+1,"excerpt":s["excerpt"]} for s in sources]
     },ensure_ascii=False)
-    try:
-        async with httpx.AsyncClient(timeout=28) as client:
-            if cfg["provider"]=="openrouter":
-                r=await client.post("https://openrouter.ai/api/v1/chat/completions",headers={"Authorization":"Bearer "+os.environ["OPENROUTER_API_KEY"],"X-Title":"Declic live studio"},json={"model":cfg["model"],"messages":[{"role":"user","content":prompt}],"temperature":0.3,"max_tokens":3500})
-                r.raise_for_status()
-                raw=r.json()["choices"][0]["message"]["content"]
-            else:
-                r=await client.post("https://generativelanguage.googleapis.com/v1beta/models/"+cfg["model"]+":generateContent",headers={"x-goog-api-key":os.environ["GEMINI_API_KEY"]},json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.3,"maxOutputTokens":1500,"responseMimeType":"application/json"}})
-                r.raise_for_status()
-                raw=" ".join(p.get("text","") for c in r.json().get("candidates",[]) for p in c.get("content",{}).get("parts",[]))
-        lesson["steps"]=parse_narrations(raw,lesson)
+    from .providers import route
+    result=await route(prompt,lambda raw:parse_narrations(raw,lesson),budget=1600,role="narration")
+    if result:
+        lesson["steps"],lesson["provider"],lesson["model"]=result
         lesson["mode"]="live_ai"
         lesson["notice"]="Narration IA · schémas et formules prédéfinis" if lang=="fr" else "AI narration · predefined diagrams and formulas"
-    except (httpx.HTTPError,ValueError,KeyError,TypeError,IndexError,AttributeError) as exc:
-        logging.getLogger(__name__).warning("Studio provider or parser failure: %s status=%s", type(exc).__name__,exc.response.status_code if isinstance(exc,httpx.HTTPStatusError) else None)
+    else:
         lesson["notice"]="IA indisponible · guide local" if lang=="fr" else "AI unavailable · local guide"
     return lesson

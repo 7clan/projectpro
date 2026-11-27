@@ -220,4 +220,15 @@ Restart DÉCLIC, use an English lesson, select the local speech engine and choos
 
 ### Optional Pocket TTS comparison
 
-Two experimental English voice profiles, Pocket Alba and Pocket George, use Kyutai's standalone runtime. Download the official v4.0.1 Windows x86_64 archive from https://github.com/kyutai-labs/pocket-tts/releases/tag/v4.0.1 and extract the executable to `voices/pocket/pocket-tts.exe`. Initialize the model and each voice with the official CLI before use. This first initialization requires Internet access to fetch the public pretrained model and voice assets; subsequent inference is performed on the CPU. The application does not send narration to a TTS API. No arbitrary reference voice or user-provided executable path is accepted. Use the supplied voice identifiers, not personal voice recordings. Model and voice attribution: https://huggingface.co/kyutai/pocket-tts-without-voice-cloning and https://huggingface.co/kyutai/tts-voices. Quality and startup latency must be evaluated before enabling by default.
+Pocket George and Pocket Alba use Kyutai's standalone runtime. Download the official v4.0.1 Windows x86_64 archive from https://github.com/kyutai-labs/pocket-tts/releases/tag/v4.0.1 and extract the executable to `voices/pocket/pocket-tts.exe`. Initialize the model and each voice with the official CLI before use. This first initialization requires Internet access to fetch the public pretrained model and voice assets; subsequent inference is performed on the CPU. The application does not send narration to a TTS API. No arbitrary reference voice or user-provided executable path is accepted. Use the supplied voice identifiers, not personal voice recordings. Model and voice attribution: https://huggingface.co/kyutai/pocket-tts-without-voice-cloning and https://huggingface.co/kyutai/tts-voices. Quality and startup latency must be evaluated before enabling by default.
+
+
+### Install the approved automatic fallback voices
+
+After pulling the updated main branch, run this once in the existing Windows PowerShell virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\install_voice_fallbacks.py
+```
+
+The installer downloads and verifies the pinned Pocket TTS runtime, initializes the English George model, installs French Piper Tom, and synthesizes actual WAV files for both. It requires Internet for first-time asset installation; a successful installation prints both PASS lines. The existing launcher does not automatically download large voice assets. Cloud narration prefers HeyGen, then Gemini; automatic local narration prefers George for English and Tom for French. Smooth Michael is an optional English backup if its assets and dependencies are separately installed (see Kokoro instructions above). Existing Piper voices remain emergency backups. Browser status reports the backend that actually rendered the scene. If a chosen voice fails, explicit selection is not silently replaced.

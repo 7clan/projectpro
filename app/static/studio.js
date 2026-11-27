@@ -58,7 +58,7 @@ function drawGenerated(step,animate=false){
   else if(o.kind==='polyline'||o.kind==='polygon')n=child(o.kind,{...attrs,points:o.points.map(p=>p.join(',')).join(' ')});
   else if(o.kind==='curve'){let d='M '+o.points[0].join(' ');for(let i=1;i<o.points.length-1;i++){const a=o.points[i],b=o.points[i+1];d+=' Q '+a.join(' ')+' '+((a[0]+b[0])/2)+' '+((a[1]+b[1])/2);}d+=' L '+o.points[o.points.length-1].join(' ');n=child('path',{...attrs,d});}
   else if(o.kind==='text')n=child('text',{x:o.x,y:o.y,fill:color,'font-size':o.size,'font-weight':600,'text-anchor':'middle'},o.text);
-  const reveal=()=>{g.style.opacity='1';if(reduced||!animate)return;
+  const reveal=()=>{g.style.opacity='1';svg.dispatchEvent(new CustomEvent('studio:reveal',{detail:{at:o.at,audioTime:voiceAudio?.currentTime??null,kind:o.kind}}));if(reduced||!animate)return;
    if(o.motion==='draw'&&n&&typeof n.getTotalLength==='function'){const len=n.getTotalLength();if(len>0){n.animate([{strokeDasharray:String(len),strokeDashoffset:len},{strokeDasharray:String(len),strokeDashoffset:0}],{duration:(o.duration||1)*1000,fill:'forwards'});}}
    else if(o.motion==='move')g.animate([{transform:'translate(0px,0px)'},{transform:'translate('+o.dx+'px,'+o.dy+'px)'}],{duration:(o.duration||1.8)*1000,fill:'forwards',easing:'ease-in-out'});
    else if(o.motion==='grow'||o.motion==='rotate'){g.style.transformBox='fill-box';g.style.transformOrigin='center';const from=o.motion==='grow'?'scale(.05)':'rotate(0deg)';const to=o.motion==='grow'?'scale(1)':'rotate('+o.angle+'deg)';g.animate([{transform:from},{transform:to}],{duration:(o.duration||1)*1000,fill:'forwards',easing:'ease-out'});}
@@ -67,7 +67,7 @@ function drawGenerated(step,animate=false){
   };
   if(animate&&!reduced){g.style.opacity='0';boardReveals.push({at:o.at,done:false,reveal});}else reveal();
  }
- progressBoard(0);
+ if(!animate)progressBoard(0);
 }
 
 function add(role,content){const node=document.createElement('div');node.className='studio-message '+role;node.textContent=content;by('studio-chatlog').appendChild(node);by('studio-chatlog').scrollTop=by('studio-chatlog').scrollHeight;}
@@ -79,12 +79,12 @@ function play(){
  function active(){return epoch===ui.epoch&&ui.playing;}
  function advance(){if(!active())return;svg.dataset.audio='ended';clearTimeout(ui.timer);clearBoardTimers();finishBoard();const remaining=Math.max(0,...svg.getAnimations({subtree:true}).map(a=>Math.max(0,(a.effect?.getComputedTiming().endTime||0)-(a.currentTime||0))).filter(Number.isFinite));ui.timer=setTimeout(()=>{if(!active())return;if(ui.index+1>=ui.steps.length){ui.playing=false;by('studio-play').textContent='▶ Play';return;}ui.index++;run();},Math.max(1200,Math.min(4000,remaining+200)));}
  async function run(){if(!active())return;releaseAudio();render();const s=ui.steps[ui.index],duration=Math.max(3500,s.narration.length*55);
-  if(by('studio-voice').checked){try{const res=await api('/api/studio/audio',{method:'POST',body:JSON.stringify({text:s.narration,lang:state.language,cues:[...new Set((s.objects||[]).map(o=>o.at))].sort((a,b)=>a-b)})});const marks=JSON.parse(res.headers.get('X-Studio-Cues')||'[]');const blob=await res.blob();if(!active())return;voiceUrl=URL.createObjectURL(blob);const audio=new Audio(voiceUrl);voiceAudio=audio;audio.ontimeupdate=()=>{if(active()&&Number.isFinite(audio.duration)&&audio.duration>0)progressBoard(marks.length?Math.max(0,...marks.filter(m=>m.time<=audio.currentTime+.04).map(m=>m.at)):audio.currentTime/audio.duration);};audio.onended=()=>{if(active())advance();};audio.onerror=()=>{if(active()){releaseAudio();timedBoard(duration);ui.timer=setTimeout(advance,duration);}};await audio.play();if(!active())return;svg.dataset.audio='playing';svg.dataset.cueCount=String(marks.length);return;}catch{if(!active())return;releaseAudio();}}
+  if(by('studio-voice').checked){try{const res=await api('/api/studio/audio',{method:'POST',body:JSON.stringify({text:s.narration,lang:state.language,cues:[...new Set((s.objects||[]).map(o=>o.at))].sort((a,b)=>a-b)})});const marks=JSON.parse(res.headers.get('X-Studio-Cues')||'[]');const blob=await res.blob();if(!active())return;voiceUrl=URL.createObjectURL(blob);const audio=new Audio(voiceUrl);voiceAudio=audio;audio.onplaying=()=>{if(active()){svg.dataset.audio='playing';progressBoard(0);}};audio.ontimeupdate=()=>{if(active()&&Number.isFinite(audio.duration)&&audio.duration>0)progressBoard(marks.length?Math.max(0,...marks.filter(m=>m.time<=audio.currentTime+.04).map(m=>m.at)):audio.currentTime/audio.duration);};audio.onended=()=>{if(active())advance();};audio.onerror=()=>{if(active()){releaseAudio();timedBoard(duration);ui.timer=setTimeout(advance,duration);}};await audio.play();if(!active())return;svg.dataset.audio='playing';svg.dataset.cueCount=String(marks.length);progressBoard(0);return;}catch{if(!active())return;releaseAudio();}}
 
   if(by('studio-voice').checked&&'speechSynthesis'in window&&'SpeechSynthesisUtterance'in window){
    const u=new SpeechSynthesisUtterance(s.narration);u.lang=fr()?'fr-FR':'en-US';u.rate=.95;
    let boundary=false,started=false;
-   u.onstart=()=>{if(!active())return;started=true;ui.timer=setTimeout(()=>{if(active()&&!boundary)timedBoard(duration);},900);};
+   u.onstart=()=>{if(!active())return;started=true;progressBoard(0);ui.timer=setTimeout(()=>{if(active()&&!boundary)timedBoard(duration);},900);};
    u.onboundary=e=>{if(!active())return;if(!boundary){boundary=true;clearBoardTimers();clearTimeout(ui.timer);}progressBoard(e.charIndex/Math.max(1,s.narration.length));};
    u.onend=advance;
    u.onerror=()=>{if(active()){clearTimeout(ui.timer);timedBoard(duration);ui.timer=setTimeout(advance,duration);}};

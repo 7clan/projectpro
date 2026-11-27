@@ -80,3 +80,18 @@ jobs:
                       print("FAIL:",type(e).__name__)
           if not ok: raise SystemExit(1)
           PY
+
+  identify-unknown:
+    runs-on: ubuntu-latest
+    env:
+      UNKNOWN_KEY: ${{ secrets.SOME }}
+    steps:
+      - name: Identify known credential format without network transmission
+        run: |
+          python - <<'PY'
+          import os
+          key=os.environ.get("UNKNOWN_KEY","")
+          prefixes={"sk-or-v1-":"OpenRouter","gsk_":"Groq","csk-":"Cerebras","AIza":"Google API","nvapi-":"NVIDIA","hf_":"Hugging Face"}
+          matches=[name for prefix,name in prefixes.items() if key.startswith(prefix)]
+          print("SOME:",matches[0] if len(matches)==1 else "unidentified" if key else "not configured")
+          PY

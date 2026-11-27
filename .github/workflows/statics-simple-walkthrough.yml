@@ -1,0 +1,44 @@
+name: Statics Lab simple narrated walkthrough
+on:
+  workflow_dispatch:
+  push:
+    branches: ['test/statics-lab-5725549']
+    paths: ['.github/workflows/statics-simple-walkthrough.yml']
+permissions:
+  contents: read
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMEINI }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+      BAZAARLINK_API_KEY: ${{ secrets.SOME }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt -r requirements-voice.txt playwright
+      - run: mkdir -p voices && python -m piper.download_voices --data-dir voices en_US-lessac-medium
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth
+      - name: Record slow English demonstration
+        run: |
+          mkdir -p statics-walkthrough
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/statics-server.log 2>&1 &
+          for i in $(seq 1 60); do curl --silent --fail http://127.0.0.1:8000/api/health && break; sleep .5; done
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
+          xvfb-run -a -s "-screen 0 1440x900x24" env PYTHONPATH=. python scripts/statics_simple_walkthrough.py
+          ffmpeg -hide_banner -i statics-walkthrough/DECLIC-statics-simple.mp4 -vn -af volumedetect -f null - 2>statics-walkthrough/audio-check.txt
+          grep max_volume statics-walkthrough/audio-check.txt
+          python -c "import re; assert float(re.search(r'max_volume: (-?[0-9.]+)',open('statics-walkthrough/audio-check.txt').read()).group(1))>-50"
+          ffprobe -v error -show_format -show_streams -of json statics-walkthrough/DECLIC-statics-simple.mp4 >statics-walkthrough/video-metadata.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-statics-simple-narrated-video
+          path: statics-walkthrough/

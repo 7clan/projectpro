@@ -104,7 +104,7 @@ def _pocket_render(text,lang,cues,voice_name):
         for i,(fragment,positions) in enumerate(chunks):
             path=Path(folder)/f"phrase-{i}.wav"
             try:
-                subprocess.run([executable,"generate","--language","english_2026-10","--voice",_POCKET_VOICES[voice_name],"--text="+fragment,"--output-path",str(path),"--sampler-decode-steps","3"],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=18,check=True)
+                subprocess.run([executable,"generate","--language","english_2026-04","--voice",_POCKET_VOICES[voice_name],"--text="+fragment,"--output-path",str(path),"--sampler-decode-steps","3"],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=18,check=True)
             except (subprocess.SubprocessError,OSError) as exc:
                 logging.getLogger(__name__).warning("Pocket synthesis failed: %s",type(exc).__name__)
                 raise FileNotFoundError("Pocket voice unavailable") from exc

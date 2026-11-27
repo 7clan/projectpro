@@ -1,0 +1,74 @@
+name: Studio Live browser demo
+on:
+  push:
+    paths: ['.github/workflows/studio-demo.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+      OPENROUTER_MODEL: google/gemini-2.5-flash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt playwright
+      - run: python -m pytest -q && node --check app/static/studio.js
+      - run: python -m playwright install --with-deps chromium
+      - name: Record animated AI lesson
+        run: |
+          mkdir -p recordings
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/studio.log 2>&1 &
+          python - <<'PY'
+          import time, urllib.request, json, os
+          from playwright.sync_api import sync_playwright
+          assert os.environ.get('OPENROUTER_API_KEY')
+          for i in range(60):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:8000/api/health')
+                  break
+              except Exception:
+                  time.sleep(.3)
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              ctx=browser.new_context(viewport={'width':1440,'height':900},record_video_dir='recordings',record_video_size={'width':1440,'height':900})
+              page=ctx.new_page()
+              errors=[]
+              page.on('pageerror',lambda e:errors.append(str(e)))
+              page.goto('http://127.0.0.1:8000')
+              page.locator('#demo-login').click()
+              page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('openrouter')")
+              page.locator('[data-view="studio"]').click()
+              page.locator('#studio-consent').check()
+              # Headless Chromium has no guaranteed installed voice; test timed captions.
+              page.locator('#studio-voice').uncheck()
+              results=[]
+              for question in ['Pourquoi les réactions ne sont-elles pas toujours égales ?', 'Et pourquoi une charge répartie agit-elle au milieu ?']:
+                  page.locator('#studio-question').fill(question)
+                  with page.expect_response(lambda r:'/api/studio' in r.url and r.request.method=='POST',timeout=45000) as event:
+                      page.locator('#studio-send').click()
+                  payload=event.value.json()
+                  assert payload['mode']=='live_ai',payload.get('notice')
+                  assert len(payload['steps'])==4
+                  page.wait_for_function("document.querySelector('#studio-mode').textContent==='AI · LIVE'")
+                  page.wait_for_timeout(3000)
+                  for i in range(1,4):
+                      page.locator('#studio-steps button').nth(i).click()
+                      page.wait_for_timeout(4000)
+                  results.append(payload)
+              assert not errors,errors
+              ctx.close()
+              browser.close()
+          with open('recordings/lesson-responses.json','w') as f:json.dump(results,f,ensure_ascii=False,indent=2)
+          print('PASS: two live AI lessons and eight visual scenes; browser audio not tested')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-studio-live
+          path: recordings/

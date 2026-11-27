@@ -366,9 +366,11 @@ async def upload_document(file: UploadFile = File(...),subject: str = Form('RDM2
             raise HTTPException(422,'Les PDF chiffrés ne sont pas acceptés')
         if pdf.page_count==0 or pdf.page_count>MAX_PAGES:
             raise HTTPException(422,f'Le document doit contenir entre 1 et {MAX_PAGES} pages')
-        pages=[(i,p.get_text()[:20000]) for i,p in enumerate(pdf)]
-        count=pdf.page_count
         pdf.close()
+        import asyncio
+        from .ocr import extract_pages
+        pages,methods=await asyncio.to_thread(extract_pages,data)
+        count=len(pages)
     except HTTPException:
         raise
     except Exception:
@@ -378,7 +380,8 @@ async def upload_document(file: UploadFile = File(...),subject: str = Form('RDM2
     with db() as con:
         con.execute('INSERT INTO documents(id,user_id,title,subject,data,page_count,created_at) VALUES(?,?,?,?,?,?,?)',(did,user['id'],title,subject[:50],data,count,now()))
         con.executemany('INSERT INTO document_pages(document_id,page,content) VALUES(?,?,?)',[(did,p,text) for p,text in pages])
-    return {'id':did,'title':title,'page_count':count,'indexed_pages':sum(bool(t.strip()) for _,t in pages)}
+        con.executemany('INSERT INTO page_extraction(document_id,page,method) VALUES(?,?,?)',[(did,p,m) for p,m in methods])
+    return {'id':did,'title':title,'page_count':count,'indexed_pages':sum(bool(t.strip()) for _,t in pages),'extraction':[{'page':p,'method':m} for p,m in methods]}
 
 
 @app.get('/api/documents/{document_id}/pdf')
@@ -408,7 +411,8 @@ def document_page_text(document_id:str,page:int,user=Depends(user_from_token)):
     if not 0<=page<d['page_count']:
         raise HTTPException(404,'Page introuvable')
     data=one('SELECT content FROM document_pages WHERE document_id=? AND page=?',(document_id,page))
-    return {'title':d['title'],'page':page,'content':data['content']}
+    method=one('SELECT method FROM page_extraction WHERE document_id=? AND page=?',(document_id,page))
+    return {'title':d['title'],'page':page,'content':data['content'],'method':method['method'] if method else 'legacy'}
 
 
 @app.post('/api/documents/{document_id}/events',status_code=201)

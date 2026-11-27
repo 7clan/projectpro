@@ -61,3 +61,36 @@ def test_model_cooldown_and_text_fallback(monkeypatch):
     assert calls==["openrouter","gemini","gemini"]
     monkeypatch.setenv("DECLIC_GEMINI_TEXT_FALLBACK","0")
     assert asyncio.run(providers.route("q",lambda x:x)) is None
+
+
+def test_bazaarlink_free_only_request(monkeypatch):
+    calls=[]
+    class Client:
+        async def post(self,url,headers,json):
+            calls.append((url,headers,json))
+            return httpx.Response(200,json={"choices":[{"message":{"content":"ok"}}]},request=httpx.Request("POST",url))
+    result=asyncio.run(providers.complete(Client(),"bazaarlink","qwen/qwen3.7-flash","test-key","test",500))
+    assert result=="ok"
+    assert calls[0][0]=="https://api.bazaarlink.ai/v1/chat/completions"
+    assert calls[0][1]["X-Free-Fallback"]=="false"
+    assert calls[0][1]["Authorization"]=="Bearer test-key"
+
+def test_three_provider_roles_and_shared_bazaar_quota(monkeypatch):
+    monkeypatch.setenv("BAZAARLINK_API_KEY","bazaar-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY","router-test")
+    monkeypatch.setattr(providers,"_cooldowns",{})
+    calls=[]
+    async def options(client):
+        return [("bazaarlink","qwen","b"),("bazaarlink","deepseek","b"),("openrouter","gemma","r"),("gemini","g","g")]
+    async def complete(client,provider,model,key,prompt,budget):
+        calls.append((provider,model))
+        return "ok"
+    monkeypatch.setattr(providers,"candidates",options)
+    monkeypatch.setattr(providers,"complete",complete)
+    assert asyncio.run(providers.route("q",lambda x:x,role="lesson"))==("ok","bazaarlink","qwen")
+    assert asyncio.run(providers.route("q",lambda x:x,role="coach"))==("ok","openrouter","gemma")
+    assert asyncio.run(providers.route("q",lambda x:x,role="review",exclude_model="qwen"))==("ok","bazaarlink","deepseek")
+    providers._limit("bazaarlink","qwen",httpx.Response(429,headers={"Retry-After":"60"}))
+    assert not providers._ready("bazaarlink","deepseek")
+    assert asyncio.run(providers.route("q",lambda x:x,role="lesson"))==("ok","openrouter","gemma")
+    assert all(p!="gemini" for p,m in calls)

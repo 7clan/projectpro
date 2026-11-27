@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS reading_events (
   document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, page INTEGER NOT NULL,
   activity TEXT NOT NULL, seconds INTEGER NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS page_extraction (
+ document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+ page INTEGER NOT NULL, method TEXT NOT NULL, PRIMARY KEY(document_id,page)
+);
 CREATE INDEX IF NOT EXISTS idx_attempt_user ON attempts(user_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_read_user ON reading_events(user_id,created_at);
 """

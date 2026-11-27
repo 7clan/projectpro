@@ -66,3 +66,23 @@ def test_auth_form_cannot_default_to_get(client):
     p=Parser();p.feed(client.get("/").text)
     assert p.form["method"]=="post"
     assert "disabled" in p.submit
+
+
+@pytest.mark.parametrize("lang,question,followup",[
+ ("en","Explain Pythagoras with sides 3, 4 and 5","Explain more"),
+ ("fr","Explique Pythagore avec les côtés 6, 8 et 10","Explique davantage"),
+ ("en","Explain Newton's second law with 2 kg and 6 N","Explain more"),
+ ("fr","Explique la deuxième loi de Newton avec 2 kg et 6 N","Explique davantage")])
+def test_checked_followup_advances_narration_and_preserves_calculations(lang,question,followup):
+    from app.local_board import compile_plan,requested_diagram
+    kind,values=requested_diagram(question)
+    assert set(values)=={"a","b"}
+    scene={"title":"Example","speech":"A short explanation.","formula":"—","diagram":kind,**values,"label1":"a","label2":"b","label3":"c"}
+    raw=json.dumps({"scenes":[scene,scene]})
+    first,checks=compile_plan(raw,question,lang)
+    effective,_=studio_context.resolve_turn(followup,[{"role":"student","text":question}])
+    second,more=compile_plan(raw,effective,lang)
+    assert [s["narration"] for s in first]!=[s["narration"] for s in second]
+    assert all(a["narration"]!=b["narration"] for a,b in zip(first,second))
+    assert [s["objects"] for s in first]==[s["objects"] for s in second]
+    assert [x for x in checks if x.get("op")]==[x for x in more if x.get("op")]

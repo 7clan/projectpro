@@ -8,7 +8,7 @@ permissions:
 jobs:
   record:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 16
     env:
       GEMINI_API_KEY: ${{ secrets.GEMEINI }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}

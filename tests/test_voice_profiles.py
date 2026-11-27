@@ -30,3 +30,18 @@ def test_kokoro_is_explicit_and_english_only(monkeypatch):
     assert backend=="kokoro-heart" and calls==["kokoro-heart"]
     with pytest.raises(ValueError):
         asyncio.run(voice.synthesize_preferred("Bonjour","fr",[0],voice_name="kokoro-heart"))
+
+
+def test_soft_pause_cleanup_preserves_words_length_and_timing():
+    np=pytest.importorskip("numpy")
+    rate=24000
+    speech=(.1*np.sin(2*np.pi*220*np.arange(rate//2)/rate)).astype(np.float32)
+    gap=np.full(rate//2,.0008,dtype=np.float32)
+    x=np.concatenate([speech,gap,speech])
+    y=voice._soften_kokoro_pauses(x,rate)
+    assert len(y)==len(x)
+    assert np.array_equal(y[:rate//2],speech)
+    assert np.array_equal(y[rate:],speech)
+    assert np.max(np.abs(y[rate*7//10:rate*8//10]))<.00013
+    assert np.isfinite(y).all()
+    assert np.array_equal(voice._soften_kokoro_pauses(speech,rate),speech)

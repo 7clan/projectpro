@@ -104,6 +104,28 @@ def validate_board(raw):
         result.append({"scene":"generated","title":string(step.get("title"),80),"formula":string(step.get("formula","—"),120),"narration":string(step.get("narration"),450),"objects":clean})
     return result
 
+def fit_scene(objects):
+    """Fit a mildly oversized AI scene as one group; preserve angles and ratios."""
+    if not objects:return
+    extents=[bounds(o) for o in objects]
+    left=min(b[0] for b in extents);top=min(b[1] for b in extents)
+    right=max(b[2] for b in extents);bottom=max(b[3] for b in extents)
+    if min(left,top)<-150 or right>750 or bottom>480:
+        raise ValueError("Scene grossly out of bounds")
+    if left>=12 and top>=12 and right<=588 and bottom<=318:return
+    factor=min(1,576/max(1,right-left),306/max(1,bottom-top))
+    ox=(600-factor*(left+right))/2
+    oy=(330-factor*(top+bottom))/2
+    for o in objects:
+        if "points" in o:o["points"]=[[round(x*factor+ox,4),round(y*factor+oy,4)] for x,y in o["points"]]
+        for k in ("x","x2"):
+            if k in o:o[k]=round(o[k]*factor+ox,4)
+        for k in ("y","y2"):
+            if k in o:o[k]=round(o[k]*factor+oy,4)
+        for k in ("w","h","r","rx","ry","dx","dy"):
+            if k in o:o[k]=round(o[k]*factor,4)
+        if "size" in o:o["size"]=max(12,min(32,round(o["size"]*factor,4)))
+
 def validate_compact(raw):
     """Expand a compact, low-token instruction format into the same validated scene schema."""
     if not isinstance(raw,str) or len(raw)>45000: raise ValueError("Invalid output")
@@ -140,7 +162,7 @@ def validate_compact(raw):
             elif k=="square_on_segment":
                 if not isinstance(p,list) or len(p)!=5: raise ValueError("Invalid square segment")
                 x1,y1,x2,y2,side=p
-                for v in (x1,y1,x2,y2): num(v,0,600)
+                for v in (x1,y1,x2,y2): num(v,-150,750)
                 if side not in (-1,1) or (x1,y1)==(x2,y2): raise ValueError("Invalid square side")
                 dx,dy=x2-x1,y2-y1
                 ox,oy=-dy*side,dx*side
@@ -153,6 +175,16 @@ def validate_compact(raw):
                 obj["dx"],obj["dy"]=a
             if obj["motion"]=="rotate":obj["angle"]=o.get("a",90)
             objects.append(obj)
+        # Validate geometry types before fitting. Bad data is rejected, not executed.
+        for obj in objects:
+            if "points" in obj:
+                if not isinstance(obj["points"],list) or not obj["points"]:raise ValueError("Invalid points")
+                for pair in obj["points"]:
+                    if not isinstance(pair,list) or len(pair)!=2:raise ValueError("Invalid point")
+                    for v in pair:num(v,-150,750)
+            for k in ("x","y","x2","y2","w","h","r","rx","ry","size","dx","dy"):
+                if k in obj:num(obj[k],-200,750)
+        fit_scene(objects)
         steps.append({"title":scene.get("h"),"formula":scene.get("e","—"),"narration":scene.get("n"),"objects":objects})
     return validate_board(json.dumps({"steps":steps},ensure_ascii=False))
 

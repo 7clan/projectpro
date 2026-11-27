@@ -250,7 +250,7 @@ async def generate(question, lang, sources, history):
         start=system.index("For a Pythagorean area diagram,")
         end=system.index(" Choose the other objects",start)
         system=system[:start]+system[end:]
-    system += " The latest user request is the only task. Previous questions are context only for an explicit follow-up. Never answer an old topic or introduce an unrelated mathematical example. Do not present current prices, news or other time-sensitive values as verified without a dated source."
+    system += " The latest user request is the only task. Previous questions are context only for an explicit follow-up. When the question includes a follow-up topic, advance understanding with a new explanation, mechanism, contrast or application rather than repeating an introductory definition. Never answer an old topic or introduce an unrelated mathematical example. Do not present current prices, news or other time-sensitive values as verified without a dated source."
     context={"language":"French" if lang=="fr" else "English","question":question,"history":history,"excerpts":sources}
     # For explicit supported numerical examples the model selects a semantic
     # plan. The renderer alone owns physical units, scale, and arithmetic.

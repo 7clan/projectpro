@@ -1,3 +1,4 @@
+from browser_wait import wait_for
 """Browser acceptance for new course tools and interrupt controls.
 Uses actual local API; synthetic speech-recognition events only for mic wiring.
 """
@@ -20,13 +21,13 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:8000")
     page.locator("#demo-login").click()
     expect(page.locator("#auth-overlay")).to_be_hidden()
-    page.wait_for_function("state.challenge!==null && !state.labBusy")
+    wait_for(page,"state.challenge!==null && !state.labBusy")
     page.locator('[data-view="library"]').click()
     page.locator("#course-file").set_input_files("data/demo_rdm2.pdf")
     with page.expect_response(lambda r:r.url.endswith("/api/documents") and r.request.method=="POST") as event:
         page.locator("#upload-form button").click()
     assert event.value.status==201
-    page.wait_for_function("state.reader && !state.readerLoading")
+    wait_for(page,"state.reader && !state.readerLoading")
     check(page,"01-course-upload")
     page.locator('[data-view="quiz"]').click()
     expect(page.locator("#quiz-document option")).to_have_count(2)
@@ -40,7 +41,7 @@ with sync_playwright() as p:
     expect(page.locator("#quiz-results h3")).to_be_visible()
     check(page,"03-quiz-feedback")
     page.locator("#quiz-results button").first.click()
-    page.wait_for_function("state.currentView==='library' && state.reader && !state.readerLoading")
+    wait_for(page,"state.currentView==='library' && state.reader && !state.readerLoading")
     check(page,"04-quiz-source-navigation")
     page.locator('[data-view="classroom"]').click()
     page.locator("#class-name").fill("RDM demonstration")
@@ -55,7 +56,7 @@ with sync_playwright() as p:
     m.goto("http://127.0.0.1:8000")
     m.locator("#demo-login").click()
     expect(m.locator("#auth-overlay")).to_be_hidden()
-    m.wait_for_function("state.challenge!==null && !state.labBusy")
+    wait_for(m,"state.challenge!==null && !state.labBusy")
     m.locator('[data-view="classroom"]').click()
     m.locator("#class-join-code").fill(c["join_code"])
     m.locator("#class-consent").check()

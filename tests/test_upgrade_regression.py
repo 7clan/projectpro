@@ -63,3 +63,23 @@ def test_unrelated_offline_question_has_no_fake_beam_lesson(client,auth):
     data=r.json()
     assert data['mode']=='guided_offline'
     assert data['steps'][0]['scene']=='unavailable'
+
+
+def test_visible_equations_are_checked_independently():
+    from app.numerical_checks import verify_formula
+    assert verify_formula("3² + 4² = 5²")
+    assert verify_formula("6 ÷ 2 = 3")
+    assert verify_formula("9 + 16 = 25 = 5²")
+    assert verify_formula("F = ma") is None
+    with pytest.raises(ValueError):verify_formula("6 / 2 = 4")
+    with pytest.raises(ValueError):verify_formula("3² + 4² = 6²")
+
+def test_fit_scene_preserves_geometry():
+    from app.whiteboard import fit_scene
+    points=[[-20,0],[100,0],[-20,90]]
+    objects=[{"kind":"polygon","points":points}]
+    fit_scene(objects)
+    a,b,c=objects[0]["points"]
+    assert 10<=a[0]<=590 and 10<=a[1]<=320
+    assert a[1]==b[1] and a[0]==c[0]
+    assert abs((b[0]-a[0])/(c[1]-a[1])-4/3)<.0001

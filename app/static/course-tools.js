@@ -13,12 +13,12 @@ async function materials(){
 id('quiz-start').onclick=async()=>{
  if(busy)return;busy=true;id('quiz-start').disabled=true;
  try{
-  quiz=await api('/api/quizzes',{method:'POST',body:JSON.stringify({document_id:id('quiz-document').value||null,count:Number(id('quiz-count').value)})});
+  quiz=await api('/api/quizzes',{method:'POST',body:JSON.stringify({document_id:id('quiz-document').value||null,count:Number(id('quiz-count').value),kind:id('quiz-kind').value,difficulty:id('quiz-difficulty').value,lang:state.language})});
   id('quiz-results').replaceChildren();id('quiz-questions').replaceChildren();
   for(const [i,q] of quiz.questions.entries()){
    const wrap=el('div','course-question');const label=el('label',null,(i+1)+'. '+q.prompt);label.htmlFor='q-'+q.id;
-   const input=el('input');input.id='q-'+q.id;input.maxLength=200;input.autocomplete='off';input.required=true;
-   wrap.append(label,el('small','muted',q.title+' · p. '+(q.page+1)),input);id('quiz-questions').append(wrap);
+   const input=el(q.options?'select':'input');input.id='q-'+q.id;input.required=true;if(q.options){input.add(new Option(t('Choisir','Choose'),''));for(const o of q.options)input.add(new Option(o,o));}else{input.maxLength=200;input.autocomplete='off';}
+   wrap.append(label,el('small','muted',q.title+(q.page!==null?' · p. '+(q.page+1):' · '+(q.difficulty||''))),input);id('quiz-questions').append(wrap);
   }
   id('quiz-form').hidden=false;id('quiz-form').querySelector('button').disabled=false;
   status('quiz-status',quiz.questions.length+' / '+quiz.eligible_pages+' '+t('questions / pages lisibles','questions / readable pages'));

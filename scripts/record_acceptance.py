@@ -52,7 +52,16 @@ with sync_playwright() as p:
             result["reference_replay"]=fixture_mode
             result["model"]=lesson.get("model")
             result["provider"]=lesson.get("provider")
-            if os.getenv("DECLIC_LOCAL_ONLY")=="1":assert result["provider"]=="ollama",lesson.get("provider")
+            if os.getenv("DECLIC_LOCAL_ONLY")=="1":
+                assert result["provider"]=="ollama",lesson.get("provider")
+                labels={o.get("text") for step in lesson["steps"] for o in step["objects"] if o["kind"]=="text"}
+                if label=="physics":
+                    assert {"m = 2 kg","F = 6 N","a = 3 m/s²"}<=labels,labels
+                    assert any(c.get("op")=="divide" and c.get("operands")==[6,2] and c.get("result")==3 for c in lesson["numerical_checks"])
+                else:
+                    assert {"9","16","25"}<=labels,labels
+                    assert any(c.get("op")=="pythagoras" and c.get("operands")==[3,4] and c.get("result")==5 for c in lesson["numerical_checks"])
+                result["semantic_acceptance"]=True
             # Replay from the beginning so both streams start together and no generation wait dominates the clip.
             if "Stop" in page.locator("#studio-play").inner_text():page.locator("#studio-play").click()
             page.locator("#studio-steps button").first.click()

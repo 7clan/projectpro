@@ -31,6 +31,7 @@ with sync_playwright() as p:
             page.locator('[data-view="studio"]').click()
             page.locator("#studio-consent").check()
             page.locator("#studio-voice").check()
+            if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1":page.locator("#studio-voice-engine").select_option("cloud")
             page.evaluate("""() => {
                 window.studioTrace=[];
                 document.querySelector('#studio-svg').addEventListener('studio:reveal',e=>window.studioTrace.push({...e.detail,wall:performance.now()}));
@@ -60,6 +61,7 @@ with sync_playwright() as p:
             assert int(page.locator("#studio-svg").get_attribute("data-cue-count") or 0)>0
             result["voice_backend"]=page.locator("#studio-svg").get_attribute("data-voice-backend")
             if os.getenv("DECLIC_REQUIRE_NEURAL")=="1": assert result["voice_backend"]=="piper-neural",result["voice_backend"]
+            if os.getenv("DECLIC_REQUIRE_GEMINI_VOICE")=="1": assert result["voice_backend"]=="gemini-neural",result["voice_backend"]
             page.wait_for_function("document.querySelector('#studio-play').textContent.includes('Play')",timeout=150000)
             assert page.locator("#studio-svg").get_attribute("data-audio")=="ended"
             trace=page.evaluate("window.studioTrace")

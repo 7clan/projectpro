@@ -1,3 +1,4 @@
+from browser_wait import wait_for
 """Automated accessibility inspection; not a physical-device or screen-reader test."""
 import json
 from pathlib import Path
@@ -16,7 +17,7 @@ with sync_playwright() as p:
         expect(page.get_by_role("textbox",name="Adresse email / Email address")).to_be_visible()
         page.locator("#demo-login").click()
         expect(page.locator("#auth-overlay")).to_be_hidden()
-        page.wait_for_function("state.challenge!==null && !state.labBusy")
+        wait_for(page,"state.challenge!==null && !state.labBusy")
         for view in ["dashboard","lab","library","profile","coach","studio","discover"]:
             page.locator('[data-view="'+view+'"]').click()
             section=page.locator("#view-"+view)

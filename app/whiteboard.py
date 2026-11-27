@@ -240,7 +240,7 @@ def validate_lesson(raw):
     return steps,checks
 
 async def generate(question, lang, sources, history):
-    from .providers import route,local_only
+    from .providers import route,local_only,mode,local_model,use_mode
     if local_only():
         from .local_board import generate_local
         return await generate_local(question,lang,sources,history)
@@ -251,7 +251,16 @@ async def generate(question, lang, sources, history):
         steps,checks=validate_lesson(raw)
         checks.extend(verify_subject_labels(steps,question))
         return steps,checks
-    result=await route(system+"\n"+json.dumps(context,ensure_ascii=False),check,2600)
+    # Small local models use semantic plans, not the long free-form SVG prompt.
+    hybrid=mode()=="hybrid" and bool(local_model())
+    if hybrid:
+        with use_mode("cloud",True):
+            result=await route(system+"\n"+json.dumps(context,ensure_ascii=False),check,2600)
+        if result is None:
+            from .local_board import generate_local
+            return await generate_local(question,lang,sources,history)
+    else:
+        result=await route(system+"\n"+json.dumps(context,ensure_ascii=False),check,2600)
     if result is None: return None
     (steps,checks),provider,model=result
     return {"mode":"live_ai","visual_mode":"generated","provider":provider,"model":model,"steps":steps,"numerical_checks":checks,"sources":sources,"notice":"Tableau généré par IA · contenu à vérifier" if lang=="fr" else "AI-generated whiteboard · verify educational content"}

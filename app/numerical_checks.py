@@ -41,7 +41,13 @@ def verify_formula(formula):
     """Verify fully numeric equality chains; return None for symbolic or unsupported notation."""
     import ast
     import re
-    expression=formula.replace("²","**2").replace("³","**3").replace("×","*").replace("÷","/").replace("−","-").replace("^","**")
+    # Accept a named result and a trailing SI unit, but do not remove units
+    # inside the arithmetic: conversions and dimensional algebra are not inferred.
+    normalized=formula.strip()
+    normalized=re.sub(r"^(?:[a-zA-Z]|R[AB]|[ΣΔ][a-zA-Z])\s*=\s*","",normalized)
+    normalized=re.sub(r"\s+(?:m/s[²³23]?|km/h|kg|kN|N|Pa|J|W|V|A|Hz|cm[²³]?|m[²³]?|s)\s*$","",normalized)
+    normalized=re.sub(r"(?<=\d),(?=\d)",".",normalized)
+    expression=normalized.replace("²","**2").replace("³","**3").replace("×","*").replace("÷","/").replace("−","-").replace("^","**")
     if "=" not in expression or len(expression)>120 or not re.fullmatch(r"[0-9. +*/()=\-]+",expression):
         return None
     def evaluate(node,depth=0):
@@ -66,8 +72,32 @@ def verify_formula(formula):
         return v
     try:
         values=[evaluate(ast.parse(part.strip(),mode="eval").body) for part in expression.split("=")]
-    except (SyntaxError,ValueError,ZeroDivisionError,OverflowError):
+    except SyntaxError:
         return None
     if any(abs(float(a-values[0]))>max(.00001,abs(float(values[0]))*.0001) for a in values[1:]):
         raise ValueError("Incorrect visible numerical equality")
     return {"formula":formula,"scope":"numeric equality only"}
+
+
+def verify_newton_labels(steps,question):
+    """Check explicitly labelled F, m and a in a Newton-II question, in SI only.
+    Do not infer relationships from other contexts or mix numbers across scenes.
+    """
+    import re
+    q=question.casefold()
+    if "newton" not in q or not any(x in q for x in ("deuxième","seconde","second","2e","2nd","2ème")):
+        return []
+    output=[]
+    for step in steps:
+        texts=[step["formula"]]+[o["text"] for o in step["objects"] if o["kind"]=="text"]
+        values={}
+        patterns={"force":r"\bF\s*=\s*(-?\d+(?:[.,]\d+)?)\s*N\b","mass":r"\bm\s*=\s*(-?\d+(?:[.,]\d+)?)\s*kg\b","acceleration":r"\ba\s*=\s*(-?\d+(?:[.,]\d+)?)\s*m/s(?:²|\^2|2)(?!\w)"}
+        for key,pattern in patterns.items():
+            matches={number(float(m.replace(",","."))) for t in texts for m in re.findall(pattern,t)}
+            if len(matches)==1:values[key]=matches.pop()
+        if len(values)==3:
+            f,m,a=(values[k] for k in ("force","mass","acceleration"))
+            if m<=0 or abs(float(f-m*a))>max(.00001,abs(float(f))*.0001):
+                raise ValueError("Newton II labels contradict F = m × a")
+            output.append({"scope":"Newton II explicit SI labels","force_N":float(f),"mass_kg":float(m),"acceleration_m_s2":float(a)})
+    return output

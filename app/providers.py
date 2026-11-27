@@ -27,9 +27,22 @@ def _limit(provider,model,response):
     seconds=300 if status in (401,403) else max(15,min(600,delay))
     _cooldowns[(provider,scope)]=time.monotonic()+seconds
 
+def local_model():
+    name=os.getenv("DECLIC_OLLAMA_MODEL","").strip()
+    # Do not treat Ollama cloud models as offline inference.
+    if not name or "cloud" in name.casefold() or "/" in name and name.startswith(("http:","https:")):return ""
+    return name
+
+def local_only():
+    return os.getenv("DECLIC_LOCAL_ONLY")=="1"
+
+def local_timeout():
+    try:return max(30,min(300,int(os.getenv("DECLIC_OLLAMA_TIMEOUT","180"))))
+    except ValueError:return 180
+
 async def candidates(client):
     result=[]
-    local=os.getenv('DECLIC_OLLAMA_MODEL','').strip()
+    local=local_model()
     if local:result.append(('ollama',local,''))
     if os.getenv('DECLIC_LOCAL_ONLY')=='1':return result
     key=os.getenv("GEMINI_API_KEY") or os.getenv("GEMEINI")
@@ -69,7 +82,7 @@ async def candidates(client):
 async def complete(client,provider,model,key,prompt,budget=3000):
     if provider=="ollama":
         # Fixed loopback endpoint; clients cannot supply server URLs or models.
-        r=await client.post("http://127.0.0.1:11434/api/chat",json={"model":model,"messages":[{"role":"user","content":prompt}],"stream":False,"format":"json","options":{"num_predict":budget,"temperature":0.3}})
+        r=await client.post("http://127.0.0.1:11434/api/chat",timeout=local_timeout(),json={"model":model,"messages":[{"role":"user","content":prompt}],"stream":False,"format":"json","options":{"num_predict":budget,"num_ctx":4096,"temperature":0.3}})
         r.raise_for_status()
         return r.json()["message"]["content"]
     if provider=="gemini":
@@ -131,7 +144,7 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
 
 async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
     try:
-        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=50)
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if local_model() else 50)
     except asyncio.TimeoutError:
         log.warning("Provider routing deadline exceeded role=%s",role)
         return None

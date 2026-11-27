@@ -416,6 +416,7 @@ class StudioRequest(BaseModel):
     lang: str = Field(default='fr',pattern='^(fr|en)$')
     consent_external: bool = False
     history: list[StudioTurn] = Field(default_factory=list,max_length=8)
+    generative: bool = False
 
 @app.post('/api/studio')
 async def studio(payload:StudioRequest,user=Depends(user_from_token)):
@@ -423,4 +424,14 @@ async def studio(payload:StudioRequest,user=Depends(user_from_token)):
     b=beam_for(owned_challenge(payload.challenge_id,user['id'])) if payload.challenge_id else Beam()
     pages=all_rows('SELECT d.id AS document_id,d.title,p.page,p.content FROM document_pages p JOIN documents d ON d.id=p.document_id WHERE d.user_id=? LIMIT 900',(user['id'],))
     sources=search_sources(pages,payload.question)
-    return await teach(payload.question,b,payload.lang,sources,[x.model_dump() for x in payload.history],payload.consent_external)
+    history=[x.model_dump() for x in payload.history]
+    if payload.generative and payload.consent_external:
+        from .whiteboard import generate
+        result=await generate(payload.question,payload.lang,sources,history)
+        if result is not None:
+            return result
+    result=await teach(payload.question,b,payload.lang,sources,history,payload.consent_external)
+    result['visual_mode']='predefined'
+    if payload.generative:
+        result['notice'] += ' · Tableau génératif non disponible' if payload.lang=='fr' else ' · Generative board unavailable'
+    return result

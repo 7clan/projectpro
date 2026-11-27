@@ -1,0 +1,69 @@
+name: Live lesson quality benchmark
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/lesson-benchmark.yml']
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMEINI }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt
+      - run: sudo apt-get update && sudo apt-get install -y espeak-ng
+      - run: pytest -q tests/test_providers.py tests/test_voice_review.py tests/test_whiteboard.py
+      - name: Generate and examine synthetic lessons
+        run: |
+          mkdir -p benchmark
+          python - <<'PY'
+          import asyncio,json,logging,re
+          from app.whiteboard import generate
+          from app.reviewer import review
+          from app.voice import synthesize
+          logging.basicConfig(level=logging.INFO)
+          cases=[
+            ("geometry","Explique le théorème de Pythagore sur un triangle rectangle de côtés 3, 4 et 5. Montre les trois aires 9, 16 et 25. Le dessin doit respecter les proportions du triangle."),
+            ("computing","Explique une file FIFO avec A, B et C qui entrent dans cet ordre. Montre que A sort en premier, puis B, puis C."),
+            ("physics","Explique la deuxième loi de Newton pour une masse de 2 kg et une force nette de 6 N, avec une accélération de 3 m/s². Montre les vecteurs.")
+          ]
+          async def main():
+              records=[]
+              for subject,question in cases:
+                  try:
+                      lesson=await generate(question,"fr",[],[])
+                      if not lesson:
+                          records.append({"subject":subject,"generated":False})
+                          print(subject,"GENERATION FAILED",flush=True)
+                          continue
+                      r=await review(question,lesson["steps"],lesson["model"])
+                      audio_ok=True
+                      for step in lesson["steps"]:
+                          try:
+                              wav,marks=await synthesize(step["narration"],"fr",[o["at"] for o in step["objects"]])
+                              assert len(wav)>1000 and marks
+                          except Exception as exc:
+                              print("AUDIO ERROR",type(exc).__name__)
+                              audio_ok=False
+                      counts={"objects":sum(len(s["objects"]) for s in lesson["steps"]),"moving":sum(o["motion"] in ("move","grow","rotate") for s in lesson["steps"] for o in s["objects"])}
+                      record={"subject":subject,"generated":True,"review":r,"audio":audio_ok,"counts":counts,"lesson":lesson}
+                      records.append(record)
+                      print("RESULT",subject,lesson["model"],json.dumps(counts),json.dumps(r,ensure_ascii=False),flush=True)
+                      print("NARRATION",json.dumps([{"title":s["title"],"formula":s["formula"],"narration":s["narration"]} for s in lesson["steps"]],ensure_ascii=False),flush=True)
+                  finally:
+                      with open("benchmark/lessons.json","w") as f:json.dump(records,f,ensure_ascii=False,indent=2)
+              assert all(x.get("generated") and x.get("audio") for x in records), "Generation or audio failed"
+          asyncio.run(main())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-lesson-benchmark
+          path: benchmark/

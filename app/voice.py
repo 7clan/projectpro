@@ -110,6 +110,7 @@ def _neural_render(text,lang,cues):
     return out.getvalue(),marks
 
 _cloud_retry_at=0.0
+_router_voice_retry_at=0.0
 
 class CloudRateLimited(RuntimeError):
     def __init__(self,seconds=60):
@@ -117,7 +118,7 @@ class CloudRateLimited(RuntimeError):
         self.seconds=max(15,min(600,seconds))
 
 async def synthesize_preferred(text,lang,cues,cloud=False):
-    global _cloud_retry_at
+    global _cloud_retry_at,_router_voice_retry_at
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
     if cloud and time.monotonic()>=_cloud_retry_at:
@@ -129,6 +130,16 @@ async def synthesize_preferred(text,lang,cues,cloud=False):
             logging.getLogger(__name__).warning("Cloud voice rate limited; local voice used for %s seconds",exc.seconds)
         except (asyncio.TimeoutError,ImportError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
             logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
+    if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
+        try:
+            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),20)
+            return audio,marks,"openrouter-heygen-neural"
+        except CloudRateLimited as exc:
+            _router_voice_retry_at=time.monotonic()+exc.seconds
+            logging.getLogger(__name__).warning("OpenRouter speech rate limited; local voice activated")
+        except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
+            _router_voice_retry_at=time.monotonic()+60
+            logging.getLogger(__name__).warning("OpenRouter speech fallback: %s",type(exc).__name__)
     try:
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
         return audio,marks,"piper-neural"
@@ -195,4 +206,52 @@ async def _gemini_render(text,lang,cues):
         for raw,positions in parts:
             marks.extend({"at":f,"time":round(offset/24000,4)} for f in positions)
             w.writeframes(raw);offset+=len(raw)//2
+    return output.getvalue(),marks
+
+
+async def _openrouter_render(text,lang,cues):
+    """Free-only HeyGen speech; actual audio frame counts drive reveal timing."""
+    import httpx
+    key=os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")
+    if not key:raise FileNotFoundError("OpenRouter key unavailable")
+    # Fixed documented zero-price model and provider. Never fall back to paid speech.
+    model="heygen/heygen-voice-1-turbo:free"
+    chunks=split_cues(text,cues)
+    while len(chunks)>3:
+        i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
+        a,aa=chunks[i];b,bb=chunks[i+1]
+        chunks[i:i+2]=[(a+" "+b,sorted(set(aa+bb)))]
+    marks=[];offset=0
+    output=io.BytesIO()
+    async with httpx.AsyncClient(timeout=12) as client:
+        with wave.open(output,"wb") as w:
+            w.setnchannels(1);w.setsampwidth(2);w.setframerate(44100)
+            for fragment,positions in chunks:
+                try:
+                    r=await client.post("https://openrouter.ai/api/v1/audio/speech",
+                        headers={"Authorization":"Bearer "+key},
+                        json={"model":model,"input":fragment,"voice":"nadine","response_format":"pcm","provider":{"only":["heygen"],"allow_fallbacks":False}})
+                    if r.status_code==429:
+                        try:delay=float(r.headers.get("Retry-After","60"))
+                        except ValueError:delay=60
+                        raise CloudRateLimited(delay if math.isfinite(delay) else 60)
+                    r.raise_for_status()
+                except httpx.HTTPError as exc:
+                    raise RuntimeError("OpenRouter speech unavailable") from exc
+                raw=r.content
+                mime=r.headers.get("content-type","").lower()
+                if not (mime.startswith("audio/") or mime.startswith("application/octet-stream")):
+                    raise ValueError("Unexpected speech content type")
+                if raw.startswith(b"RIFF"):
+                    with wave.open(io.BytesIO(raw),"rb") as src:
+                        if (src.getnchannels(),src.getsampwidth(),src.getframerate())!=(1,2,44100):
+                            raise ValueError("Unexpected speech format")
+                        raw=src.readframes(src.getnframes())
+                elif "mpeg" in mime or "mp3" in mime or raw.startswith(b"ID3"):
+                    raise ValueError("Compressed audio instead of PCM")
+                if len(raw)<4410 or len(raw)>4_000_000 or len(raw)%2:
+                    raise ValueError("Malformed speech audio")
+                if not any(raw):raise ValueError("Silent audio")
+                marks.extend({"at":f,"time":round(offset/44100,4)} for f in positions)
+                w.writeframes(raw);offset+=len(raw)//2
     return output.getvalue(),marks

@@ -22,7 +22,7 @@ with sync_playwright() as p:
         page.on("pageerror",lambda e:errors.append(str(e)))
         page.goto("http://127.0.0.1:8000")
         page.locator("#demo-login").click()
-        wait_for(page,"!!state.user && !document.querySelector('#auth-overlay').hidden === false")
+        wait_for(page,"!!state.user && !!state.aiMode && document.querySelector('#auth-overlay').hidden")
         if page.evaluate("state.language")!=lang:page.locator("#language").click()
         page.locator('[data-view="studio"]').click()
         page.locator("#studio-voice").uncheck()
@@ -32,8 +32,8 @@ with sync_playwright() as p:
         with page.expect_response(lambda r:r.url.endswith("/api/studio") and r.request.method=="POST",timeout=30000) as event:page.locator("#studio-send").click()
         lesson=event.value.json();assert lesson["steps"],lesson
         (out/(lang+"-lesson.json")).write_text(json.dumps(lesson,ensure_ascii=False,indent=2))
-        wait_for(page,"ui.steps.length>0 && !ui.busy")
-        if page.evaluate("ui.playing"):page.locator("#studio-play").click()
+        wait_for(page,"document.querySelectorAll('#studio-steps button').length>0 && !document.querySelector('#studio-send').disabled")
+        if "Stop" in page.locator("#studio-play").inner_text():page.locator("#studio-play").click()
         page.locator("#studio-voice-engine").select_option("local")
         for voice in voices:
             rec=None;result={"voice":voice,"lang":lang,"lesson_mode":lesson.get("mode")}
@@ -60,7 +60,7 @@ with sync_playwright() as p:
                 wait_for(page,"document.querySelector('#studio-svg').dataset.audio==='playing'",timeout=15000)
                 page.locator("#studio-voice-profile").scroll_into_view_if_needed()
                 page.screenshot(path=str(out/(voice+".png")))
-                wait_for(page,"!ui.playing && document.querySelector('#studio-svg').dataset.audio==='ended'",timeout=70000)
+                wait_for(page,"document.querySelector('#studio-play').textContent.includes('Play') && document.querySelector('#studio-svg').dataset.audio==='ended'",timeout=70000)
                 time.sleep(.5);rec.communicate(b"q",timeout=15);rec=None
                 check=subprocess.run(["ffmpeg","-hide_banner","-i",str(out/(voice+".mp4")),"-af","volumedetect","-vn","-f","null","-"],capture_output=True,text=True)
                 m=re.search(r"max_volume: (-?[0-9.]+)",check.stderr)

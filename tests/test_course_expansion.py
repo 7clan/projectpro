@@ -436,3 +436,32 @@ def test_cloud_pythagoras_rejects_pixel_units_and_renders_actual_areas(monkeypat
     assert labels=={"9","16","25"}
     assert result["steps"][-1]["formula"]=="9 + 16 = 25"
     assert "checked mathematical rendering" in result["notice"]
+
+
+def test_cloud_pythagoras_two_leg_wording_and_visual_regression(monkeypatch):
+    from app import whiteboard,providers
+    from app.local_board import requested_diagram
+    question="Explain the Pythagorean theorem using a right triangle with sides of 5 and 12 units. Animate the construction of the three squares and demonstrate why their areas satisfy the theorem."
+    assert requested_diagram(question)==("triangle",{"a":5.0,"b":12.0})
+    assert requested_diagram("Explique Pythagore avec les côtés de 5 et 12 unités")==("triangle",{"a":5.0,"b":12.0})
+    assert requested_diagram("Explain Pythagoras with sides 3, 4 and 6")==("triangle",{})
+    scene={"title":"Triangle","speech":"Observe the triangle.","formula":"—","diagram":"triangle","a":5,"b":12,"label1":"a","label2":"b","label3":"c"}
+    wrong={"s":[{"h":"Area Summation","e":"25 + 144 = 169","n":"The areas add.","o":[{"k":"circle","p":[200,150,30]},{"k":"rect","p":[350,150,60,60]}]}]*2}
+    async def fake_route(prompt,validator,budget=3000,**kwargs):
+        with pytest.raises(ValueError):
+            validator(json.dumps(wrong))
+        return validator(json.dumps({"scenes":[scene,scene]})),"gemini","test"
+    monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+    monkeypatch.setattr(providers,"route",fake_route)
+    with providers.use_mode("cloud",True):
+        result=asyncio.run(whiteboard.generate(question,"en",[],[]))
+    final=result["steps"][-1]
+    assert final["formula"]=="25 + 144 = 169"
+    assert "13 units long" in final["narration"]
+    assert {o["text"] for o in final["objects"] if o["kind"]=="text"}=={"25","144","169"}
+    polygons=[o["points"] for o in final["objects"] if o["kind"]=="polygon"]
+    assert sorted(map(len,polygons))==[3,4,4,4]
+    triangle=polygons[-1]
+    for i,square in enumerate(polygons[:-1]):
+        assert square[:2]==[triangle[i],triangle[(i+1)%3]]
+    assert not any(o["kind"]=="circle" for o in final["objects"])

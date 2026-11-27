@@ -226,3 +226,19 @@ def test_independent_subject_relationships_and_review():
     with pytest.raises(ValueError):verify_subject_labels([scene],"Loi d'Ohm")
     result=asyncio.run(review("Loi d'Ohm",[scene],"author-model"))
     assert result["verdict"]=="revise" and result["provider"]=="deterministic"
+
+
+def test_local_diagram_must_match_question():
+    from app.local_board import compile_plan,schema_for,requested_diagram
+    q="Montre la deuxième loi de Newton pour une masse de 2 kg et une force de 6 N."
+    assert requested_diagram(q)==("force",{"a":2.0,"b":6.0})
+    props=schema_for(q)["properties"]["scenes"]["items"]["properties"]
+    assert props["diagram"]["enum"]==["force"] and props["a"]["enum"]==[2.0]
+    scene={"title":"Newton","speech":"La force agit sur une masse.","formula":"F = m × a","diagram":"triangle","a":2,"b":6,"label1":"a","label2":"b","label3":"c"}
+    with pytest.raises(ValueError):compile_plan(json.dumps({"scenes":[scene,scene]}),q)
+    scene["diagram"]="force"
+    steps,checks=compile_plan(json.dumps({"scenes":[scene,scene]}),q)
+    assert any(o.get("text")=="a = 3 m/s²" for o in steps[1]["objects"])
+    assert "3 mètres" in steps[1]["narration"]
+    scene["a"]=4
+    with pytest.raises(ValueError):compile_plan(json.dumps({"scenes":[scene,scene]}),q)

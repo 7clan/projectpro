@@ -8,7 +8,7 @@ permissions:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 22
+    timeout-minutes: 18
     env:
       DECLIC_REQUIRE_NEURAL: '1'
       DECLIC_LOCAL_ONLY: "1"

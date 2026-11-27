@@ -101,3 +101,30 @@ def verify_newton_labels(steps,question):
                 raise ValueError("Newton II labels contradict F = m × a")
             output.append({"scope":"Newton II explicit SI labels","force_N":float(f),"mass_kg":float(m),"acceleration_m_s2":float(a)})
     return output
+
+
+def verify_subject_labels(steps,question):
+    """Cross-check explicit, unambiguous SI labels within a single scene.
+    Scope is deliberately limited to the named relationship, not general proof.
+    """
+    import re
+    q=question.casefold()
+    specs=[
+      (("ohm",), "Ohm's law", {"V":r"\b(?:U|V)\s*=\s*(-?\d+(?:[.,]\d+)?)\s*V\b","R":r"\bR\s*=\s*(-?\d+(?:[.,]\d+)?)\s*(?:Ω|ohms?)\b","I":r"\bI\s*=\s*(-?\d+(?:[.,]\d+)?)\s*A\b"},lambda v:(v["V"],v["R"]*v["I"])),
+      (("density","masse volumique"), "Density", {"rho":r"(?:ρ|rho)\s*=\s*(-?\d+(?:[.,]\d+)?)\s*kg/m(?:³|\^3|3)","m":r"\bm\s*=\s*(-?\d+(?:[.,]\d+)?)\s*kg\b","vol":r"\bV\s*=\s*(-?\d+(?:[.,]\d+)?)\s*m(?:³|\^3|3)"},lambda v:(v["m"],v["rho"]*v["vol"])),
+      (("kinetic energy","énergie cinétique"), "Kinetic energy", {"E":r"\b(?:Ec|E_k|E)\s*=\s*(-?\d+(?:[.,]\d+)?)\s*J\b","m":r"\bm\s*=\s*(-?\d+(?:[.,]\d+)?)\s*kg\b","v":r"\bv\s*=\s*(-?\d+(?:[.,]\d+)?)\s*m/s(?![\d²³^])"},lambda v:(v["E"],v["m"]*v["v"]**2/2))
+    ]
+    output=verify_newton_labels(steps,question)
+    for keys,scope,patterns,relation in specs:
+        if not any(key in q for key in keys):continue
+        for step in steps:
+            texts=[step["formula"]]+[o["text"] for o in step["objects"] if o["kind"]=="text"]
+            values={}
+            for key,pattern in patterns.items():
+                matches={number(float(m.replace(",","."))) for t in texts for m in re.findall(pattern,t)}
+                if len(matches)==1:values[key]=matches.pop()
+            if len(values)!=len(patterns):continue
+            left,right=relation(values)
+            if abs(float(left-right))>max(.00001,abs(float(left))*.0001):raise ValueError(scope+" labels contradict the stated relationship")
+            output.append({"scope":scope+" explicit SI labels","values":{k:float(v) for k,v in values.items()}})
+    return output

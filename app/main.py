@@ -524,6 +524,11 @@ async def studio(payload:StudioRequest,request:Request,user=Depends(user_from_to
 
 
 
+@app.get('/api/studio/voices')
+def studio_voices(user=Depends(user_from_token)):
+    from .voice import voice_choices
+    return {"voices":voice_choices()}
+
 @app.post('/api/studio/audio')
 async def studio_audio(payload: dict, request:Request,user=Depends(user_from_token)):
     from .cancellation import until_disconnect
@@ -535,8 +540,10 @@ async def studio_audio(payload: dict, request:Request,user=Depends(user_from_tok
     cues=payload.get('cues',[])
     if not isinstance(text,str) or not 1<=len(text)<=450 or lang not in ('fr','en') or not isinstance(cues,list) or len(cues)>32:
         raise HTTPException(422,'Invalid narration')
+    options={"cloud":payload.get('cloud') is True and payload.get('consent_external') is True and payload.get('ai_mode')!='local'}
+    if payload.get('voice_name') is not None:options['voice_name']=payload['voice_name']
     try:
-        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(synthesize_preferred(text,lang,cues,cloud=payload.get('cloud') is True and payload.get('consent_external') is True and payload.get('ai_mode')!='local'),45))
+        audio,marks,backend=await until_disconnect(request,asyncio.wait_for(synthesize_preferred(text,lang,cues,**options),45))
     except (ValueError,TypeError):
         raise HTTPException(422,'Invalid narration or cue')
     except (FileNotFoundError,asyncio.TimeoutError):

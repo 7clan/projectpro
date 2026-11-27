@@ -74,15 +74,20 @@ from functools import lru_cache
 
 _VOICE_LOCK=threading.Lock()
 _VOICE_NAMES={"fr":"fr_FR-siwis-medium","en":"en_US-lessac-medium"}
+_EXTRA_VOICES={"en_US-amy-medium":"en","en_US-ryan-medium":"en","en_GB-alba-medium":"en","fr_FR-tom-medium":"fr"}
+def voice_choices():
+    directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
+    return [{"id":name,"lang":lang,"installed":(directory/(name+".onnx")).is_file() and (directory/(name+".onnx.json")).is_file()} for name,lang in _EXTRA_VOICES.items()]
+
 
 @lru_cache(maxsize=2)
 def _piper_voice(path):
     from piper import PiperVoice
     return PiperVoice.load(path)
 
-def _neural_render(text,lang,cues):
+def _neural_render(text,lang,cues,voice_name=None):
     directory=Path(os.getenv("DECLIC_PIPER_DIR",str(Path(__file__).resolve().parents[1]/"voices")))
-    path=directory/(_VOICE_NAMES[lang]+".onnx")
+    path=directory/((voice_name or _VOICE_NAMES[lang])+".onnx")
     if not path.is_file() or not Path(str(path)+".json").is_file():
         raise FileNotFoundError("Neural voice model not installed")
     chunks=split_cues(text,cues)
@@ -117,11 +122,16 @@ class CloudRateLimited(RuntimeError):
         super().__init__("Cloud speech rate limited")
         self.seconds=max(15,min(600,seconds))
 
-async def synthesize_preferred(text,lang,cues,cloud=False):
+async def synthesize_preferred(text,lang,cues,cloud=False,voice_name=None):
     global _cloud_retry_at,_router_voice_retry_at
     cloud=cloud and os.getenv('DECLIC_LOCAL_ONLY')!='1'
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
+    if voice_name is not None:
+        if not isinstance(voice_name,str) or _EXTRA_VOICES.get(voice_name)!=lang:
+            raise ValueError("Unsupported voice for lesson language")
+        audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues,voice_name)
+        return audio,marks,"piper-"+voice_name
     if cloud and time.monotonic()>=_cloud_retry_at:
         try:
             audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),22)

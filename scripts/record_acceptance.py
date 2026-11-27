@@ -27,9 +27,10 @@ with sync_playwright() as p:
         try:
             page.goto("http://127.0.0.1:8000")
             page.locator("#demo-login").click()
-            page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter')")
+            page.wait_for_function("document.querySelector('#ai-mode').textContent.includes('gemini') || document.querySelector('#ai-mode').textContent.includes('openrouter') || document.querySelector('#ai-mode').textContent.includes('bazaarlink') || document.querySelector('#ai-mode').textContent.includes('ollama')")
             page.locator('[data-view="studio"]').click()
-            page.locator("#studio-consent").check()
+            if os.getenv("DECLIC_LOCAL_ONLY")!="1":page.locator("#studio-consent").check()
+            else:page.locator("#studio-consent").uncheck()
             # Avoid spending speech quota on autoplay before recording.
             page.locator("#studio-voice").uncheck()
             page.evaluate("""() => {
@@ -50,6 +51,8 @@ with sync_playwright() as p:
             result["generated"]=not fixture_mode
             result["reference_replay"]=fixture_mode
             result["model"]=lesson.get("model")
+            result["provider"]=lesson.get("provider")
+            if os.getenv("DECLIC_LOCAL_ONLY")=="1":assert result["provider"]=="ollama",lesson.get("provider")
             # Replay from the beginning so both streams start together and no generation wait dominates the clip.
             if "Stop" in page.locator("#studio-play").inner_text():page.locator("#studio-play").click()
             page.locator("#studio-steps button").first.click()
@@ -94,4 +97,4 @@ with sync_playwright() as p:
             results.append(result)
             (out/"results.json").write_text(json.dumps(results,indent=2))
     browser.close()
-assert all((r.get("reference_replay") if fixture_mode else r.get("generated")) and r.get("synchronized_reveal") and r.get("audible") for r in results),results
+assert all((r.get("reference_replay") if fixture_mode else r.get("generated")) and r.get("synchronized_reveal") and r.get("audible") and not r.get("error") for r in results),results

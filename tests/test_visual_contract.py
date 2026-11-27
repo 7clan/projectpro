@@ -99,3 +99,23 @@ def test_shared_scene_rejects_duplicate_references():
     data["library"]=[data["s"][0]["o"][0]]
     data["s"][0]["use"]=["fluid","fluid"]
     with pytest.raises(ValueError):check(data)
+
+
+def test_basic_generation_accepts_two_scene_board_without_semantic_ids(monkeypatch):
+    from app import whiteboard,providers
+    data=fixture()
+    data["s"]=data["s"][:2]
+    for scene in data["s"]:
+        for obj in scene["o"]:
+            obj.pop("id",None)
+    async def fake_route(prompt,validator,budget=3000,**kwargs):
+        assert budget==2600
+        assert "No special object IDs required" in prompt
+        return validator(json.dumps(data)),"bazaarlink","test"
+    monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
+    monkeypatch.setattr(providers,"route",fake_route)
+    with providers.use_mode("cloud",True):
+        lesson=asyncio.run(whiteboard.generate(QUESTION,"en",[],[]))
+    assert lesson["provider"]=="bazaarlink"
+    assert len(lesson["steps"])==2
+    assert "verify educational content" in lesson["notice"]

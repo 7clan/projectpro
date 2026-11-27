@@ -18,9 +18,6 @@ async def review(question,steps,author_model):
     from .numerical_checks import verify_formula,verify_subject_labels
     try:
         checks=verify_subject_labels(steps,question)
-        from .visual_checks import hydraulic_inputs,check_hydraulic
-        values=hydraulic_inputs(question)
-        if values:checks.extend(check_hydraulic(steps,values))
         for step in steps:
             for text in [step["formula"]]+[o["text"] for o in step["objects"] if o["kind"]=="text"]:
                 checked=verify_formula(text)

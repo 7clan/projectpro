@@ -1,0 +1,46 @@
+name: Local streaming speech acceptance
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/local-speech.yml']
+permissions:
+  contents: read
+jobs:
+  speech:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt -r requirements-speech.txt -r requirements-voice.txt playwright
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: python -m playwright install --with-deps chromium
+      - name: Install French local speech and voice models
+        run: |
+          mkdir -p speech-models voices speech-evidence
+          curl -fL --retry 2 https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip -o /tmp/vosk-fr.zip
+          unzip -q /tmp/vosk-fr.zip -d speech-models
+          python -m piper.download_voices --data-dir voices fr_FR-siwis-medium
+      - run: python -m pytest -q
+      - name: Prepare a known synthetic microphone utterance
+        run: |
+          python - <<'PY'
+          import asyncio,pathlib
+          from app.voice import synthesize_preferred
+          audio,_,backend=asyncio.run(synthesize_preferred("Bonjour. Explique le théorème de Pythagore.", "fr",[0]))
+          assert backend=="piper-neural",backend
+          pathlib.Path("speech-evidence/source.wav").write_bytes(audio)
+          PY
+          ffmpeg -v error -i speech-evidence/source.wav -af 'adelay=1500,apad=pad_dur=4' -ar 48000 -ac 1 -c:a pcm_s16le speech-evidence/fake-microphone.wav
+      - name: Run local speech browser test
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >speech-evidence/server.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep .5; done
+          python scripts/local_speech_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-local-speech-evidence
+          path: speech-evidence/

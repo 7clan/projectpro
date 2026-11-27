@@ -93,3 +93,32 @@ def test_local_only_never_discovers_external_providers(monkeypatch):
         return "ok"
     monkeypatch.setattr(providers,"complete",complete)
     assert asyncio.run(providers.route("q",lambda x:x))==("ok","ollama","test-local")
+
+
+def test_ocr_retry_owner_only_and_preserves_indexed_text(client,auth,monkeypatch):
+    # Import without OCR, then retry a single page with a controlled extractor.
+    monkeypatch.setattr(ocr.shutil,"which",lambda _:None)
+    r=client.post('/api/documents',headers=auth,files={'file':('scan.pdf',make_scan(),'application/pdf')})
+    url='/api/documents/'+r.json()['id']+'/pages/0/ocr'
+    other={'Authorization':'Bearer '+client.post('/api/auth/demo').json()['token']}
+    assert client.post(url,headers=other).status_code==404
+    monkeypatch.setattr(ocr,"extract_pages",lambda *a,**kw:([(0,"Recovered source text")],[(0,"ocr")]))
+    result=client.post(url,headers=auth)
+    assert result.status_code==200 and result.json()['content']=='Recovered source text'
+    assert client.post(url,headers=auth).status_code==409
+    assert client.get(url.removesuffix('/ocr')+'/text',headers=auth).json()['method']=='ocr'
+
+def test_disconnect_cancels_pending_work():
+    from app.cancellation import until_disconnect
+    from fastapi import HTTPException
+    cancelled=[]
+    class Request:
+        async def is_disconnected(self):
+            await asyncio.sleep(.01)
+            return True
+    async def work():
+        try:await asyncio.sleep(20)
+        finally:cancelled.append(True)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(until_disconnect(Request(),work()))
+    assert exc.value.status_code==499 and cancelled==[True]

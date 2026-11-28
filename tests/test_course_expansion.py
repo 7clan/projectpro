@@ -415,7 +415,7 @@ def test_local_pythagoras_complete_narration_and_progressive_reveal():
     assert {"9","16","25"} <= {o["text"] for o in steps[1]["objects"] if o["kind"]=="text"}
 
 
-def test_cloud_pythagoras_rejects_pixel_units_and_renders_actual_areas(monkeypatch):
+def test_cloud_pythagoras_repairs_pixel_units_and_renders_actual_areas(monkeypatch):
     from app import whiteboard,providers
     from app.local_board import requested_diagram
     question="Explain the Pythagorean theorem using an animated right triangle with sides 3, 4 and 5. Show the relationship between the three square areas."
@@ -423,9 +423,6 @@ def test_cloud_pythagoras_rejects_pixel_units_and_renders_actual_areas(monkeypat
     assert requested_diagram("Pythagore avec les côtés 3, 4 et 5")==("triangle",{"a":3.0,"b":4.0})
     scene={"title":"Triangle","speech":"Observe the triangle.","formula":"—","diagram":"triangle","a":60,"b":80,"label1":"a","label2":"b","label3":"c"}
     async def fake_route(prompt,validator,budget=3000,**kwargs):
-        with pytest.raises(ValueError):
-            validator(json.dumps({"scenes":[scene,scene]}))
-        scene["a"],scene["b"]=3,4
         return validator(json.dumps({"scenes":[scene,scene]})),"openrouter","test"
     monkeypatch.delenv("DECLIC_LOCAL_ONLY",raising=False)
     monkeypatch.setattr(providers,"route",fake_route)
@@ -435,4 +432,4 @@ def test_cloud_pythagoras_rejects_pixel_units_and_renders_actual_areas(monkeypat
     labels={o["text"] for o in result["steps"][-1]["objects"] if o["kind"]=="text"}
     assert labels=={"9","16","25"}
     assert result["steps"][-1]["formula"]=="9 + 16 = 25"
-    assert "checked mathematical rendering" in result["notice"]
+    assert "Question parameters restored" in result["quality_warnings"]

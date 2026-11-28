@@ -20,15 +20,92 @@ def _ready(provider,model):
 
 def _limit(provider,model,response):
     status=response.status_code
-    if status not in (401,402,403,429):return
-    try:delay=float(response.headers.get("Retry-After","60"))
-    except ValueError:delay=60
-    if not math.isfinite(delay):delay=60
-    scope="*" if status in (401,403) or (provider=="bazaarlink" and status==429) else model
-    # A 402 can reflect the requested token budget for an individual model.
-    # Do not disable every model for that response.
-    seconds=300 if status in (401,403) else max(15,min(600,delay))
-    _cooldowns[(provider,scope)]=time.monotonic()+seconds
+    if status not in (401,402,403,429,502,503,504):return
+    try:
+        body=response.json()
+        if not isinstance(body,dict):body={}
+    except (ValueError,TypeError):body={}
+    error=body.get("error",{})
+    if not isinstance(error,dict):error={}
+    metadata=error.get("metadata",{})
+    if not isinstance(metadata,dict):metadata={}
+    source=str(metadata.get("limit_source") or error.get("limit_source") or "").casefold()
+    message=str(error.get("message","")).casefold()
+    codes={str(obj.get(field,"")).casefold() for obj in (body,error)
+           for field in ("code","type","reason")}
+    scope=model
+    default=60
+    if status in (401,403):
+        scope="*"
+        default=300
+    elif provider=="openrouter":
+        if source.startswith("openrouter_free_tier_") or (
+            status==429 and ("free-models-per-" in message or "free-models-per-day" in message)
+        ) or source in ("openrouter_key_limit","openrouter_credits","openrouter_in_flight_budget"):
+            scope="*"
+        if source=="openrouter_free_tier_daily" or "free-models-per-day" in message:
+            default=86400-time.time()%86400
+    elif provider=="bazaarlink" and status==429:
+        # Unknown BazaarLink 429s are conservatively treated as account limits.
+        if "free_quota_exhausted" not in codes:
+            scope="*"
+    elif provider=="gemini" and status==429:
+        # Gemini quota IDs identify per-day limits; RetryInfo often gives only
+        # a short retry hint even when the daily model allowance is exhausted.
+        details=error.get("details",[])
+        if not isinstance(details,list):details=[]
+        daily=False
+        for detail in details:
+            if not isinstance(detail,dict):continue
+            violations=detail.get("violations",[])
+            if not isinstance(violations,list):continue
+            for violation in violations:
+                if not isinstance(violation,dict):continue
+                quota=str(violation.get("quotaId","")).casefold()
+                metric=str(violation.get("quotaMetric","")).casefold()
+                if "perday" in quota or "per_day" in metric:
+                    daily=True
+                if "perproject" in quota and "permodel" not in quota and not (isinstance(violation.get("quotaDimensions"),dict) and violation["quotaDimensions"].get("model")):
+                    scope="*"
+        if daily:
+            # Google resets RPD at midnight Pacific. Windows may lack IANA
+            # tzdata, in which case a conservative hourly recheck is used.
+            try:
+                from datetime import datetime,timedelta
+                from zoneinfo import ZoneInfo
+                now=datetime.now(ZoneInfo("America/Los_Angeles"))
+                reset=(now+timedelta(days=1)).replace(hour=0,minute=0,second=0,microsecond=0)
+                default=max(60,reset.timestamp()-now.timestamp())
+            except (ImportError,KeyError):default=3600
+        else:
+            for detail in details:
+                if isinstance(detail,dict) and str(detail.get("@type","")).endswith("RetryInfo"):
+                    try:default=max(default,float(str(detail.get("retryDelay","")).removesuffix("s")))
+                    except ValueError:pass
+    # Honor server retry timing, including OpenRouter's millisecond reset
+    # timestamp, without shortening daily quota cooldowns to a few minutes.
+    headers=metadata.get("headers",{})
+    if not isinstance(headers,dict):headers={}
+    headers={str(k).casefold():v for k,v in headers.items()}
+    delay=default
+    retry=response.headers.get("Retry-After") or headers.get("retry-after")
+    if retry is not None:
+        try:delay=float(retry)
+        except (ValueError,TypeError):
+            try:
+                from email.utils import parsedate_to_datetime
+                delay=parsedate_to_datetime(str(retry)).timestamp()-time.time()
+            except (ValueError,TypeError,OverflowError):delay=default
+    reset=response.headers.get("X-RateLimit-Reset") or headers.get("x-ratelimit-reset")
+    if reset is not None:
+        try:delay=max(delay if retry is not None else 0,float(reset)/1000-time.time())
+        except (ValueError,TypeError):pass
+    if not math.isfinite(delay):delay=default
+    if default>600:delay=max(delay,default)
+    seconds=max(15,min(86400,delay))
+    slot=(provider,scope)
+    _cooldowns[slot]=max(_cooldowns.get(slot,0),time.monotonic()+seconds)
+    log.info("AI cooldown provider=%s scope=%s seconds=%d status=%s",provider,scope,seconds,status)
 
 def local_model():
     name=os.getenv("DECLIC_OLLAMA_MODEL","").strip()
@@ -68,6 +145,15 @@ def local_timeout():
     try:return max(30,min(300,int(os.getenv("DECLIC_OLLAMA_TIMEOUT","180"))))
     except ValueError:return 180
 
+def gemini_rank(name):
+    # Prefer discovered low-use models from the pilot account, then Flash Lite.
+    n=name.casefold().removeprefix("models/")
+    return ("3.6-flash" in n, "3.5-flash-lite" in n, "lite" in n, "latest" not in n, "preview" not in n)
+
+def router_rank(name):
+    n=name.casefold()
+    return (n=="google/gemma-4-31b-it:free",any(s in n for s in ("gemma","mistral","qwen","llama")),not any(s in n for s in ("thinking","reason","r1")),"instruct" in n)
+
 async def candidates(client):
     result=[]
     local=local_model()
@@ -83,26 +169,24 @@ async def candidates(client):
             r=await client.get("https://generativelanguage.googleapis.com/v1beta/models",headers={"x-goog-api-key":key},params={"pageSize":100})
             r.raise_for_status()
             names=[m["name"].removeprefix("models/") for m in r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[]) and "flash" in m["name"] and not any(x in m["name"] for x in ("image","audio","tts","live","thinking"))]
-            names.sort(key=lambda n:(("latest" in n),("2.5" not in n),("lite" not in n),("preview" not in n)),reverse=True)
+            names.sort(key=gemini_rank,reverse=True)
             log.info("Gemini discovered %d eligible models",len(names))
-            for n in names[:4]: result.append(("gemini",n,key))
+            for n in dict.fromkeys(names[:6]): result.append(("gemini",n,key))
         except (httpx.HTTPError,KeyError,ValueError) as e:
             log.warning("Gemini discovery failed: %s",type(e).__name__)
     key=os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")
     if key:
-        explicit=[x.strip() for x in os.getenv("OPENROUTER_BOARD_MODELS","").split(",") if x.strip()]
+        explicit=[x.strip() for x in os.getenv("OPENROUTER_BOARD_MODELS","").split(",") if x.strip() and x.strip().endswith(":free")]
         try:
             r=await client.get("https://openrouter.ai/api/v1/models")
             r.raise_for_status()
             free=[m["id"] for m in r.json().get("data",[]) if m["id"].endswith(":free") and "text" in m.get("architecture",{}).get("output_modalities",["text"])]
             # Prefer instruct-oriented models, then other currently listed free models.
-            def rank(n):
-                return (any(s in n.lower() for s in ("gemma","mistral","qwen","llama")),not any(s in n.lower() for s in ("thinking","reason","r1")), "instruct" in n.lower())
-            free.sort(key=rank,reverse=True)
+            free.sort(key=router_rank,reverse=True)
             log.info("OpenRouter discovered %d free models",len(free))
         except (httpx.HTTPError,KeyError,ValueError):
             free=[]
-        for n in dict.fromkeys(explicit+free[:5]+["openrouter/free"]):
+        for n in dict.fromkeys(explicit+free[:8]+["openrouter/free"]):
             result.append(("openrouter",n,key))
     key=os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME")
     if key:
@@ -144,8 +228,11 @@ async def complete(client,provider,model,key,prompt,budget=3000):
     log.info("Model %s finish=%s content_length=%s",d.get("model",model),c.get("finish_reason"),len(c["message"].get("content") or ""))
     return c["message"].get("content") or ""
 
-async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
-    async with httpx.AsyncClient(timeout=12,trust_env=False) as client:
+async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=20,role="lesson"):
+    # Long multi-scene generation needs more time than a short coach response.
+    # Keep connection timeout short; preserve an absolute routing deadline.
+    read_timeout=35 if role=="lesson" and budget>=2600 else 12
+    async with httpx.AsyncClient(timeout=httpx.Timeout(read_timeout,connect=5),trust_env=False) as client:
         options=[o for o in await candidates(client) if o[1]!=exclude_model]
         local=[o for o in options if o[0]=="ollama" and _ready(o[0],o[1])]
         router=[o for o in options if o[0]=="openrouter" and _ready(o[0],o[1])]
@@ -155,35 +242,36 @@ async def _route(prompt,validator,budget=3000,exclude_model=None,max_candidates=
         reserve=bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER") or os.getenv("BAZAARLINK_API_KEY") or os.getenv("SOME"))
         if reserve and (role=="review" or os.getenv("DECLIC_GEMINI_TEXT_FALLBACK","1")=="0"):
             gemini=[]
-        # Different accounts share no local cooldown. Avoid redundant parallel calls.
-        # Prefer BazaarLink for original visual lessons, OpenRouter for short coaching.
-        if role=="review":
-            bazaar=sorted(bazaar,key=lambda o:"deepseek" not in o[1])
-        first,second=(bazaar,router) if role in ("lesson","review") else (router,bazaar)
-        options=[]
-        if first:options.append(first[0])
-        if second:options.append(second[0])
-        if len(first)>1:options.append(first[1])
-        if len(second)>1:options.append(second[1])
-        options.extend(gemini[:2])
-        if not first and not second:options=gemini[:3]
+        # Keep the same API key/provider while walking its ranked model pool.
+        # Shared quota failures mark the provider and skip its remaining models.
+        options=router+bazaar+gemini
         options=ollama_cloud if mode()=="ollama_cloud" else local+options if local_only() else options+ollama_cloud+local
-        for provider,model,key in options[:max_candidates]:
+        attempts=0
+        for provider,model,key in options:
             if not _ready(provider,model):continue
+            if attempts>=max_candidates:break
+            attempts+=1
+            phase="inference"
             try:
                 raw=await complete(client,provider,model,key,prompt,budget)
+                if not isinstance(raw,str) or not raw.strip():raise ValueError("Empty model response")
+                phase="validation"
                 value=validator(raw)
-                log.info("AI route success role=%s provider=%s model=%s",role,provider,model)
+                log.warning("AI route success role=%s provider=%s model=%s",role,provider,model)
                 return value,provider,model
             except (httpx.HTTPError,ValueError,KeyError,TypeError,IndexError,AttributeError) as e:
                 status=e.response.status_code if isinstance(e,httpx.HTTPStatusError) else None
                 if status is not None:_limit(provider,model,e.response)
-                log.warning("Provider %s model=%s role=%s failed %s status=%s",provider,model,role,type(e).__name__,status)
+                elif isinstance(e,httpx.TimeoutException):
+                    slot=(provider,model)
+                    _cooldowns[slot]=max(_cooldowns.get(slot,0),time.monotonic()+60)
+                # Do not log exception text: an upstream exception could contain prompt data.
+                log.warning("Provider %s model=%s role=%s failed %s status=%s phase=%s",provider,model,role,type(e).__name__,status,phase)
     return None
 
-async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=10,role="lesson"):
+async def route(prompt,validator,budget=3000,exclude_model=None,max_candidates=20,role="lesson"):
     try:
-        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if (local_model() and mode()!='cloud') or (cloud_model() and not local_only() and mode()!='disabled') else 50)
+        return await asyncio.wait_for(_route(prompt,validator,budget,exclude_model,max_candidates,role),timeout=local_timeout()+10 if (local_model() and mode()!='cloud') or (cloud_model() and not local_only() and mode()!='disabled') else (110 if role=="lesson" and budget>=2600 else 50))
     except asyncio.TimeoutError:
         log.warning("Provider routing deadline exceeded role=%s",role)
         return None

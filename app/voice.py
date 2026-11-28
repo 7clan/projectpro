@@ -111,6 +111,7 @@ def _neural_render(text,lang,cues):
 
 _cloud_retry_at=0.0
 _router_voice_retry_at=0.0
+_fish_voice_retry_at=0.0
 
 class CloudRateLimited(RuntimeError):
     def __init__(self,seconds=60):
@@ -118,13 +119,13 @@ class CloudRateLimited(RuntimeError):
         self.seconds=max(15,min(600,seconds))
 
 async def synthesize_preferred(text,lang,cues,cloud=False):
-    global _cloud_retry_at,_router_voice_retry_at
+    global _cloud_retry_at,_router_voice_retry_at,_fish_voice_retry_at
     cloud=cloud and os.getenv('DECLIC_LOCAL_ONLY')!='1'
     # Validate user-controlled inputs before attempting a backend.
     split_cues(text,cues)
     if cloud and time.monotonic()>=_cloud_retry_at:
         try:
-            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),22)
+            audio,marks=await asyncio.wait_for(_gemini_render(text,lang,cues),14)
             return audio,marks,'gemini-neural'
         except CloudRateLimited as exc:
             _cloud_retry_at=max(_cloud_retry_at,time.monotonic()+exc.seconds)
@@ -133,7 +134,7 @@ async def synthesize_preferred(text,lang,cues,cloud=False):
             logging.getLogger(__name__).warning('Cloud voice fallback: %s (%s)',type(exc).__name__,str(exc)[:100] if type(exc) in (ValueError,RuntimeError) else '')
     if cloud and time.monotonic()>=_router_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
         try:
-            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),14)
+            audio,marks=await asyncio.wait_for(_openrouter_render(text,lang,cues),12)
             return audio,marks,"openrouter-heygen-neural"
         except CloudRateLimited as exc:
             _router_voice_retry_at=time.monotonic()+exc.seconds
@@ -141,6 +142,14 @@ async def synthesize_preferred(text,lang,cues,cloud=False):
         except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error) as exc:
             _router_voice_retry_at=time.monotonic()+60
             logging.getLogger(__name__).warning("OpenRouter speech fallback: %s",type(exc).__name__)
+    if cloud and time.monotonic()>=_fish_voice_retry_at and (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")):
+        try:
+            audio,marks=await asyncio.wait_for(_fish_render(text,lang,cues),10)
+            return audio,marks,"openrouter-fish-neural"
+        except CloudRateLimited as exc:
+            _fish_voice_retry_at=time.monotonic()+exc.seconds
+        except (asyncio.TimeoutError,FileNotFoundError,OSError,RuntimeError,ValueError,TypeError,KeyError,IndexError,AttributeError,wave.Error):
+            _fish_voice_retry_at=time.monotonic()+60
     try:
         audio,marks=await asyncio.to_thread(_neural_render,text,lang,cues)
         return audio,marks,"piper-neural"
@@ -211,12 +220,19 @@ async def _gemini_render(text,lang,cues):
 
 
 async def _openrouter_render(text,lang,cues):
+    return await _router_render(text,lang,cues,"heygen/heygen-voice-1-turbo:free","heygen","nadine")
+
+async def _fish_render(text,lang,cues):
+    # Documented free-only alternative with provider default voice.
+    return await _router_render(text,lang,cues,"fish-audio/s2.1-pro-free:free","fish-audio",None)
+
+async def _router_render(text,lang,cues,model,provider,voice_name):
     """Free-only HeyGen speech; actual audio frame counts drive reveal timing."""
     import httpx
     key=os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER")
     if not key:raise FileNotFoundError("OpenRouter key unavailable")
     # Fixed documented zero-price model and provider. Never fall back to paid speech.
-    model="heygen/heygen-voice-1-turbo:free"
+    if not model.endswith(":free"):raise ValueError("Paid voice disabled")
     chunks=split_cues(text,cues)
     while len(chunks)>3:
         i=min(range(len(chunks)-1),key=lambda i:len(chunks[i][0])+len(chunks[i+1][0]))
@@ -231,7 +247,7 @@ async def _openrouter_render(text,lang,cues):
                 try:
                     r=await client.post("https://openrouter.ai/api/v1/audio/speech",
                         headers={"Authorization":"Bearer "+key},
-                        json={"model":model,"input":fragment,"voice":"nadine","response_format":"pcm","provider":{"only":["heygen"],"allow_fallbacks":False}})
+                        json={"model":model,"input":fragment,**({"voice":voice_name} if voice_name else {}),"response_format":"pcm","provider":{"only":[provider],"allow_fallbacks":False}})
                     if r.status_code==429:
                         try:delay=float(r.headers.get("Retry-After","60"))
                         except ValueError:delay=60

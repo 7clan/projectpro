@@ -1,0 +1,29 @@
+name: Hydraulic rejection root cause
+on:
+  push:
+    branches: [quality/semantic-visual-validation]
+    paths: ['.github/workflows/hydraulic-diagnostic.yml','scripts/diagnose_hydraulic.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BAZAARLINK_API_KEY: ${{ secrets.SOME }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: PYTHONPATH=. python scripts/diagnose_hydraulic.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hydraulic-root-cause-synthetic-only
+          path: diagnostic/

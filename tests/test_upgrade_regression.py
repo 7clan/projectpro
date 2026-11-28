@@ -165,3 +165,17 @@ def test_router_pcm_speech_has_exact_frame_cues(monkeypatch):
         assert w.getnframes()==88200
     assert cues==[{"at":0.0,"time":0},{"at":.5,"time":1}]
     assert len(calls)==2
+
+
+def test_pilot_model_priority_and_model_specific_quota(monkeypatch):
+    import httpx
+    from app import providers
+    monkeypatch.setattr(providers,"_cooldowns",{})
+    assert providers.router_rank("google/gemma-4-31b-it:free") > providers.router_rank("google/gemma-4-26b-a4b-it:free")
+    assert providers.gemini_rank("gemini-3.6-flash") > providers.gemini_rank("gemini-flash-latest")
+    assert providers.gemini_rank("gemini-3.5-flash-lite") > providers.gemini_rank("gemini-2.5-flash")
+    providers._limit("bazaarlink","deepseek",httpx.Response(429,json={"error":{"code":"free_quota_exhausted"}}))
+    assert not providers._ready("bazaarlink","deepseek")
+    assert providers._ready("bazaarlink","qwen")
+    providers._limit("bazaarlink","qwen",httpx.Response(429,json={"error":{"code":"rate_limit"}}))
+    assert not providers._ready("bazaarlink","another-model")

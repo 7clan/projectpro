@@ -1,0 +1,52 @@
+name: Visual lesson live acceptance
+on:
+  push:
+    branches: ['audit/visual-acceptance']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GEMEINI }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER }}
+      BAZAARLINK_API_KEY: ${{ secrets.BAZAARLINK_API_KEY || secrets.SOME }}
+      DECLIC_GEMINI_TEXT_FALLBACK: '1'
+      DECLIC_DB_PATH: /tmp/declic-visual-acceptance.sqlite3
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test and browser dependencies
+        run: |
+          pip install -r requirements-dev.txt playwright
+          python -m playwright install --with-deps chromium
+      - name: Full regression suite
+        run: |
+          python -m pytest -q -rs
+          for file in app/static/*.js; do node --check "$file"; done
+      - name: Real cloud generation and actual browser video
+        run: |
+          mkdir -p visual-evidence
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info > /tmp/visual-acceptance.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          python scripts/visual_acceptance.py
+      - name: Provider diagnostics
+        if: always()
+        run: |
+          mkdir -p visual-evidence
+          grep -E 'AI route success|AI cooldown|Provider .*failed|discovery failed|routing deadline' /tmp/visual-acceptance.log > visual-evidence/provider-log.txt || true
+          cat visual-evidence/provider-log.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: declic-live-visual-acceptance
+          path: visual-evidence/
+          retention-days: 14

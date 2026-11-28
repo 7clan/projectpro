@@ -1,0 +1,33 @@
+name: Studio conversation topic isolation
+on:
+  push:
+    branches: ['fix/studio-topic-isolation']
+    paths: ['.github/workflows/studio-topic.yml','scripts/studio_topic_acceptance.py','app/studio_context.py','app/main.py','app/local_board.py','app/whiteboard.py','app/static/index.html','app/static/app.js','app/static/studio.js']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt playwright
+      - run: python -m playwright install chromium
+      - run: python -m pytest -q && node --check app/static/app.js && node --check app/static/studio.js
+      - name: Replay actual UI with no external AI
+        env:
+          DECLIC_LOCAL_ONLY: '1'
+        run: |
+          mkdir -p topic-evidence
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >topic-evidence/server.log 2>&1 &
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
+          python scripts/studio_topic_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-studio-topic-replay
+          path: topic-evidence/

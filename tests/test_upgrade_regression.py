@@ -45,6 +45,7 @@ def test_cloud_voice_requires_explicit_consent(client,auth,monkeypatch):
     assert received==[False,True]
 
 def test_voice_falls_back_when_cloud_fails(monkeypatch):
+    monkeypatch.setattr(voice,'_piper_installed',lambda name:False)
     monkeypatch.delenv('OPENROUTER_API_KEY',raising=False)
     monkeypatch.delenv('OPENROUTER',raising=False)
     monkeypatch.setattr(voice,'_cloud_retry_at',0)
@@ -61,7 +62,7 @@ def test_router_deadline_returns_safe_fallback(monkeypatch):
 
 
 def test_unrelated_offline_question_has_no_fake_beam_lesson(client,auth):
-    r=client.post('/api/studio',headers=auth,json={'question':'Explain the Pythagorean theorem','lang':'en','generative':True})
+    r=client.post('/api/studio',headers=auth,json={'question':'Explain photosynthesis','lang':'en','generative':True})
     assert r.status_code==200
     data=r.json()
     assert data['mode']=='guided_offline'
@@ -107,6 +108,7 @@ def test_pythagorean_construction_has_outward_squares_and_exact_areas():
 
 
 def test_rate_limit_cooldown_avoids_repeated_cloud_requests(monkeypatch):
+    monkeypatch.setattr(voice,'_piper_installed',lambda name:False)
     monkeypatch.delenv('OPENROUTER_API_KEY',raising=False)
     monkeypatch.delenv('OPENROUTER',raising=False)
     calls=[]
@@ -165,3 +167,17 @@ def test_router_pcm_speech_has_exact_frame_cues(monkeypatch):
         assert w.getnframes()==88200
     assert cues==[{"at":0.0,"time":0},{"at":.5,"time":1}]
     assert len(calls)==2
+
+
+def test_pilot_model_priority_and_model_specific_quota(monkeypatch):
+    import httpx
+    from app import providers
+    monkeypatch.setattr(providers,"_cooldowns",{})
+    assert providers.router_rank("google/gemma-4-31b-it:free") > providers.router_rank("google/gemma-4-26b-a4b-it:free")
+    assert providers.gemini_rank("gemini-3.6-flash") > providers.gemini_rank("gemini-flash-latest")
+    assert providers.gemini_rank("gemini-3.5-flash-lite") > providers.gemini_rank("gemini-2.5-flash")
+    providers._limit("bazaarlink","deepseek",httpx.Response(429,json={"error":{"code":"free_quota_exhausted"}}))
+    assert not providers._ready("bazaarlink","deepseek")
+    assert providers._ready("bazaarlink","qwen")
+    providers._limit("bazaarlink","qwen",httpx.Response(429,json={"error":{"code":"rate_limit"}}))
+    assert not providers._ready("bazaarlink","another-model")

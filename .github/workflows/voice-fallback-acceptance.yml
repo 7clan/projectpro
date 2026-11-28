@@ -1,0 +1,47 @@
+name: Automatic bilingual voice fallback acceptance
+on:
+  push:
+    branches: ['feature/kokoro-english']
+    paths: ['.github/workflows/voice-fallback-acceptance.yml', 'scripts/install_voice_fallbacks.py', 'scripts/fallback_acceptance.py', 'scripts/fallback_acceptance_server.py', 'app/voice.py', 'app/static/studio.js']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fallback:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - name: Install and synthesize actual approved voices
+        run: python scripts/install_voice_fallbacks.py
+      - name: Browser recording dependencies
+        if: runner.os == 'Linux'
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+          sudo apt-get update && sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xauth
+      - name: Record actual bilingual fallback in Studio
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p fallback-evidence
+          python scripts/fallback_acceptance_server.py >fallback-evidence/server.log 2>&1 &
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=declic
+          pactl set-default-sink declic
+          xvfb-run -a -s "-screen 0 1440x900x24" python scripts/fallback_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DECLIC-fallback-${{ matrix.os }}
+          path: |
+            fallback-evidence/
+            voices/pocket/verified-*.wav
